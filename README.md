@@ -166,6 +166,9 @@ The fuzzy models use trainable Gaussian membership functions:
 
 <img width="635" height="147" alt="image" src="https://github.com/user-attachments/assets/b59ea05d-c0d4-45bf-8ae9-0b941b933e2e" />
 
+# Demo: Theta Analysis
+
+https://github.com/user-attachments/assets/21f74319-62d0-40d1-a87b-2934650889fe
 
 ## Auxiliary Tasks
 
