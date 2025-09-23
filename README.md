@@ -9,8 +9,12 @@ FireGNN is a framework for fuzzy rule-enhanced graph neural networks that combin
 ## Architecture
 <img width="625" height="351" alt="image" src="https://github.com/user-attachments/assets/3eaa5f0d-8665-4f02-96db-7155926cb089" />
 
-## Project Structure
+## Demo
 
+https://github.com/user-attachments/assets/6efb0935-37c8-4a46-97a7-2fa1d88a98c0
+
+
+## Project Structure
 ```
 FireGNN/
 ├── data_processing/     # Graph construction and data preprocessing
