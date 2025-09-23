@@ -4,6 +4,8 @@
 
 FireGNN is a framework for fuzzy rule-enhanced graph neural networks that combines trainable fuzzy rules with auxiliary tasks for improved performance on medical image classification. The system includes baseline models, fuzzy-enhanced models, and auxiliary task models.
 
+### FireGNN Paper Accepted at NeurIPS 2025 Workshop[NPGML;BranBodyFM], San Diego, USA 🎉
+
 ## Architecture
 <img width="625" height="351" alt="image" src="https://github.com/user-attachments/assets/3eaa5f0d-8665-4f02-96db-7155926cb089" />
 
@@ -223,11 +225,32 @@ python run_pipeline.py --dataset organcmnist --train_baselines --train_fuzzy --t
 
 If you use this code in your research, please cite:
 ```
-@article{firegnn2025,
-  title={FireGNN},
-  author={Your Name},
-  journal={arXiv preprint},
-  year={2025}
+@misc{sengupta2025firegnnneurosymbolicgraphneural,
+      title={FireGNN: Neuro-Symbolic Graph Neural Networks with Trainable Fuzzy Rules for Interpretable Medical Image Classification}, 
+      author={Prajit Sengupta and Islem Rekik},
+      year={2025},
+      eprint={2509.10510},
+      archivePrefix={arXiv},
+      primaryClass={eess.IV},
+      url={https://arxiv.org/abs/2509.10510}, 
+}
+
+@inproceedings{
+anonymous2025firegnn,
+title={Fire{GNN}: Neuro-Symbolic Graph Neural Networks with Trainable Fuzzy Rules for Interpretable Medical Image Classification},
+author={Anonymous},
+booktitle={Foundation Models for the Brain and Body Workshop {\textendash} NeurIPS 2025},
+year={2025},
+url={https://openreview.net/forum?id=y3dhKusYFx}
+}
+
+@inproceedings{
+sengupta2025firegnn,
+title={Fire{GNN}: Neuro-Symbolic Graph Neural Networks with Trainable Fuzzy Rules for Interpretable Medical Image Classification},
+author={Prajit Sengupta and Islem Rekik},
+booktitle={New Perspectives in Graph Machine Learning},
+year={2025},
+url={https://openreview.net/forum?id=jCwmNcGNCC}
 }
 ```
 
