@@ -15,7 +15,11 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 # Add parent directory to path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    base_dir = os.getcwd()
+sys.path.append(os.path.dirname(base_dir))
 
 from utils.graph_utils import (build_knn_graph_from_features, save_graph, set_random_seeds, 
                               get_device, compute_auxiliary_features)
