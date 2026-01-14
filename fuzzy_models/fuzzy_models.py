@@ -84,7 +84,7 @@ class FuzzyGCN(nn.Module):
         # Fuzzy rule layer
         self.fuzzy_layer = FuzzyRuleLayer(6, num_rules)  # 6 topological features
         
-        # Rule integration layers
+        # Rule integration layers: h(u)' = W [hu, ru] + b
         self.rule_integration = nn.Linear(hidden_channels + num_rules, hidden_channels)
         
         # Final classification layer
@@ -105,8 +105,8 @@ class FuzzyGCN(nn.Module):
             fuzzy_rules = self.fuzzy_layer(topo_features)
             
             # Integrate fuzzy rules with GNN embeddings
-            combined = torch.cat([x, fuzzy_rules], dim=1)
-            x = F.relu(self.rule_integration(combined))
+            combined = torch.cat([x, fuzzy_rules], dim=1) # project rule to embedding dimension
+            x = F.relu(self.rule_integration(combined)) # gating and fusion
         
         # Final classification
         out = self.classifier(x)
