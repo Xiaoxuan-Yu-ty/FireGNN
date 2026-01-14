@@ -70,8 +70,11 @@ class PaperFuzzyGCN(nn.Module):
         self.fuzzy_layer = PaperFuzzyRuleLayer(num_rules=num_rules)
 
 
-        # Rule projection: Eq. (4) & Gate: Eq. (5)
-        self.gate = nn.Linear(num_rules + hidden_channels, hidden_channels)
+        # Rule projection: Eq. (4) 
+        self.rule_proj = nn.Linear(num_rules, hidden_channels)
+
+        # Gate: Eq. (5)
+        self.gate = nn.Linear(2*hidden_channels, hidden_channels)
 
         # Classifier
         self.classifier = nn.Linear(hidden_channels, out_channels)
@@ -97,11 +100,13 @@ class PaperFuzzyGCN(nn.Module):
             # ----- Fuzzy rule activation (Eq. 3) -----
             r = self.fuzzy_layer(topo_features)  # [N, 6]
 
-            # ----- Rule projection & Gating (Eq. 5) -----
-            g = torch.sigmoid(self.gate(torch.cat([h, r], dim=1)))
+            # ----- Rule projection (Eq. 4) ---
+            e = self.rule_proj(r)
+            # ----- Gating (Eq. 5) -----
+            g = torch.sigmoid(self.gate(torch.cat([h, e], dim=1)))
 
             # ----- Fusion (Eq. 6) -----
-            h_prime = g * h + (1 - g) * r
+            h_prime = g * h + (1 - g) * e
 
         # ----- Classification -----
         out = self.classifier(h_prime)
