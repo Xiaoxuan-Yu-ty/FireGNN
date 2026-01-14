@@ -10,6 +10,104 @@ from torch_geometric.nn import GCNConv, GATConv, GINConv
 from torch_geometric.data import Data
 
 
+class PaperFuzzyRuleLayer(nn.Module):
+    """
+    FireGNN fuzzy rules exactly as defined in the paper.
+    Implements Eq. (3): r_i(u) = sigmoid(alpha_i * (f_i(u) - theta_i))
+    """
+
+    def __init__(self, num_rules=6):
+        super().__init__()
+        self.num_rules = num_rules
+
+        # Learnable thresholds θ_i
+        self.theta = nn.Parameter(torch.zeros(num_rules))
+
+        # Learnable sharpness α_i (initialized positive)
+        self.alpha = nn.Parameter(torch.ones(num_rules))
+
+    def forward(self, topo_features):
+        """
+        Args:
+            topo_features: Tensor [N, 6]
+                [degree, clustering coefficient, 2-hop label agreement]
+
+        Returns:
+            r: Tensor [N, 3] fuzzy rule activations
+        """
+        # Ensure correct dimensionality
+        assert topo_features.size(1) == self.num_rules
+
+        # r_i(u) = sigmoid(alpha_i * (f_i(u) - theta_i))
+        r = torch.sigmoid(self.alpha * (topo_features - self.theta))
+        return r
+    
+class PaperFuzzyGCN(nn.Module):
+    """
+    FireGNN GCN model exactly matching the paper formulation.
+    """
+
+    def __init__(self, in_channels, hidden_channels, out_channels,
+                 num_layers=2, dropout=0.5, num_rules=6):
+        super().__init__()
+
+        self.num_layers = num_layers
+        self.dropout = dropout
+        d = hidden_channels
+
+        # ---------- GCN backbone ----------
+        self.convs = nn.ModuleList()
+        self.convs.append(GCNConv(in_channels, hidden_channels))
+
+        for _ in range(num_layers - 1):
+            self.convs.append(GCNConv(hidden_channels, hidden_channels))
+
+        self.bns = nn.ModuleList(
+            [nn.BatchNorm1d(hidden_channels) for _ in range(num_layers - 1)]
+        )
+
+        # ---------- Fuzzy rules ----------
+        self.fuzzy_layer = PaperFuzzyRuleLayer(num_rules=num_rules)
+
+
+        # Rule projection: Eq. (4) & Gate: Eq. (5)
+        self.gate = nn.Linear(num_rules + hidden_channels, hidden_channels)
+
+        # Classifier
+        self.classifier = nn.Linear(hidden_channels, out_channels)
+
+    def forward(self, x, edge_index, edge_attr=None, topo_features=None):
+        """
+        Args:
+            x: Node features [N, in_channels]
+            edge_index: Graph edges
+            topo_features: [N, 3] (degree, clustering, 2-hop agreement)
+        """
+
+        # ----- GCN forward -----
+        for i in range(self.num_layers - 1):
+            x = self.convs[i](x, edge_index)
+            x = self.bns[i](x)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+
+        h = self.convs[-1](x, edge_index)  # h_u
+
+        if topo_features is not None:
+            # ----- Fuzzy rule activation (Eq. 3) -----
+            r = self.fuzzy_layer(topo_features)  # [N, 6]
+
+            # ----- Rule projection & Gating (Eq. 5) -----
+            g = torch.sigmoid(self.gate(torch.cat([h, r], dim=1)))
+
+            # ----- Fusion (Eq. 6) -----
+            h_prime = g * h + (1 - g) * r
+
+        # ----- Classification -----
+        out = self.classifier(h_prime)
+
+        return F.log_softmax(out, dim=1), r
+    
 class FuzzyRuleLayer(nn.Module):
     """
     Trainable fuzzy rule layer using Gaussian membership functions.
@@ -288,6 +386,8 @@ def get_fuzzy_model(model_type, in_channels, hidden_channels, out_channels, **kw
     
     if model_type == 'gcn':
         return FuzzyGCN(in_channels, hidden_channels, out_channels, **kwargs)
+    elif model_type =='fuzzy_gcn':
+        return PaperFuzzyGCN(in_channels, hidden_channels, out_channels, **kwargs)
     elif model_type == 'gat':
         return FuzzyGAT(in_channels, hidden_channels, out_channels, **kwargs)
     elif model_type == 'gin':
