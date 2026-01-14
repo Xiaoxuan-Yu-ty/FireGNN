@@ -280,7 +280,7 @@ def prepare_pytorch_geometric_data(G, topological_features=None, auxiliary_featu
         edge_attr_list.append(d['weight'])
         edge_attr_list.append(d['weight'])
     
-    edge_index = torch.tensor(edge_list).t().contiguous()
+    edge_index = torch.tensor(edge_list,dtype=torch.long).t().contiguous()
     edge_attr = torch.tensor(edge_attr_list, dtype=torch.float)
     
     # Create masks
