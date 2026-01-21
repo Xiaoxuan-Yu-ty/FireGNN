@@ -276,9 +276,10 @@ class FuzzyGAT(nn.Module):
             combined = torch.cat([x, fuzzy_rules], dim=1)
             x = F.relu(self.rule_integration(combined))
         
-        # Final classification
-        out = self.classifier(x)
-        return F.log_softmax(out, dim=1), fuzzy_rules if topo_features is not None else None
+            # Final classification
+            out = self.classifier(x)
+            
+            return F.log_softmax(out, dim=1), fuzzy_rules if topo_features is not None else None
 
 
 class MLP(nn.Module):
