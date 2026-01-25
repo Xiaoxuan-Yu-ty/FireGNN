@@ -33,7 +33,7 @@ class PaperFuzzyRuleLayer(nn.Module):
                 [degree, clustering coefficient, 2-hop label agreement]
 
         Returns:
-            r: Tensor [N, 3] fuzzy rule activations
+            r: Tensor [N, 6] fuzzy rule activations
         """
         # Ensure correct dimensionality
         assert topo_features.size(1) == self.num_rules
