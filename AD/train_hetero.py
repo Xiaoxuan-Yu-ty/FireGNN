@@ -1,9 +1,11 @@
 """
-Training functions for Rule-enhanced HeteroFireGNN models.
+Training script for edge-level learnable coefficients HeteroFuzzyGNN models.
 """
 import argparse
 import pickle
+import random
 import pandas as pd
+from sklearn.metrics import f1_score, roc_auc_score
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,27 +23,35 @@ sys.path.append(os.path.dirname(base_dir))
 
 from helper import (
     networkx_to_hetero_data,
-    compute_rule_features,
+    get_edge_features,
     get_device,
     set_random_seeds
 )
-from hetero_models import get_hetero_model
+from AD.hetero_fuzzy_models import get_hetero_model
 
 # Training Step
 # --------------------------------------------------------------------
-def train_step(model, data, rule_features, optimizer, lambdas):
+def train_epoch(model, data, edge_index_dict, edge_features, optimizer, lambdas):
     model.train()
     optimizer.zero_grad()
-    #x_dict = {nt:data[nt].x for nt in data.node_types}
-    edge_index_dict = {edge_type: data[edge_type].edge_index for edge_type in data.edge_types}
-    
     # 1. forward Pass
-    h_dict, class_out, r = model(edge_index_dict, rule_features)
+    h_dict, log_probs, edge_coeffs = model(edge_index_dict, edge_features)
     
+    data['Patient'].y = torch.as_tensor(data['Patient'].y).long().squeeze()
     # 2. classification Loss 
-    y = torch.as_tensor(data['Patient'].y).long().squeeze()
-    mask = data['Patient'].train_mask
-    loss_cls = F.nll_loss(class_out[mask], y[mask])
+
+    target = data['Patient'].y[data['Patient'].train_mask]
+    counts = torch.bincount(target)
+    weights = 1.0 / counts.float()
+    weights = weights / weights.sum() # Normalize
+
+    loss_cls = F.nll_loss(
+        log_probs[data['Patient'].train_mask], 
+        target, 
+        weight=weights # Add weight here
+    )
+
+    #loss_cls = F.nll_loss(log_probs[data['Patient'].train_mask], data['Patient'].y[data['Patient'].train_mask])
     
     # 3. link prediction loss
     loss_lp = 0
@@ -53,17 +63,19 @@ def train_step(model, data, rule_features, optimizer, lambdas):
         
         # Negative Sampling: Randomly shuffle destination nodes
         neg_edge_index = pos_edge_index.clone()
-        neg_edge_index[1] = neg_edge_index[1][torch.randperm(neg_edge_index.size(1))]
+        num_nodes_v = data[edge_type[2]].num_nodes
+        neg_edge_index[1] = torch.randint(0, num_nodes_v, (pos_edge_index.size(1),))
+        
+        #neg_edge_index[1] = neg_edge_index[1][torch.randperm(neg_edge_index.size(1))]
         neg_scores = model.decode(h_dict, neg_edge_index, edge_type)
         
         # Ranking Loss: Encourage pos_scores > neg_scores
         loss_lp += -torch.log(torch.sigmoid(pos_scores - neg_scores) + 1e-15).mean()
     
-    loss_lp = torch.tensor(loss_lp / len(data.edge_types)) # to prevent link prediction loss becomes too huge
+    loss_lp = loss_lp / len(data.edge_types) # to prevent link prediction loss becomes too huge
 
     # 4. regularizer to ensure rule activations to be 'decisive' (near 0 or 1, not 0.5)
-    loss_reg = torch.mean(r * (1 - r)) 
-    loss_reg = torch.mean(r * (1 - r)) if r is not None else torch.tensor(0.0).to(loss_lp.device)
+    loss_reg = torch.mean(edge_coeffs * (1 - edge_coeffs)) 
 
     # 5. Combined Total Loss
     total_loss = (lambdas['cls'] * loss_cls + 
@@ -72,9 +84,18 @@ def train_step(model, data, rule_features, optimizer, lambdas):
     print(total_loss.grad_fn)
     
     total_loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
+
+    results = {
+        'total_loss': total_loss.item(),
+        'cls_loss': loss_cls.item(),
+        'lp_loss': loss_lp.item(),
+        'reg_loss': loss_reg.item(),
+        'edge_coeff': edge_coeffs,
+    }
     
-    return total_loss.item(), loss_cls.item(), loss_lp.item(), loss_reg.item()
+    return results
 
 # lambda Scheduler
 class LambdaScheduler:
@@ -83,18 +104,18 @@ class LambdaScheduler:
 
     def get_lambdas(self, epoch):
         # Phase 1: Warming up the KG (Epoch 0-20)
-        if epoch < 20:
+        if epoch < 100:
             return {'cls': 0.1, 'lp': 1.0, 'reg': 0.0}
         
         # Phase 2: Shift focus to Classification (Epoch 21-100)
-        elif epoch < 100:
+        elif epoch < 200:
             # Linear ramp for classification: from 0.1 to 1.0
             cls_val = 0.1 + (0.9 * (epoch - 20) / 80)
-            return {'cls': cls_val, 'lp': 0.1, 'reg': 0.005}
+            return {'cls': cls_val, 'lp': 0.5, 'reg': 0.005}
         
         # Phase 3: Sharpen the Symbolic Rules (Epoch 100+)
         else:
-            return {'cls': 1.0, 'lp': 0.05, 'reg': 0.02}
+            return {'cls': 1.0, 'lp': 0.1, 'reg': 0.02}
 
 # Evaluation (on classification + link prediction)
 # ----------------------------------------------------------
@@ -104,18 +125,27 @@ def evaluate(model, data, rule_features, mask):
 
     # 1. classfication performance
     edge_index_dict = {edge_type: data[edge_type].edge_index for edge_type in data.edge_types}
-    h_dict, class_out, r = model(edge_index_dict, rule_features)
+    h_dict, log_probs, edge_coeffs, rule_activations, patient_weights = model(edge_index_dict, rule_features)
     
-    y = torch.as_tensor(data['Patient'].y).long().squeeze()
-    preds = class_out.argmax(dim=1)
-    correct = (preds[mask] == y[mask]).sum().item()
+    y = torch.as_tensor(data['Patient'].y).long().squeeze()[mask]
+    preds = log_probs.argmax(dim=1)[mask]
+    correct = (preds == y).sum().item()
     acc = correct / mask.sum().item()
-
+    f1 = f1_score(y.detach().cpu().numpy(), preds.detach().cpu().numpy())
+    probs = torch.exp(log_probs)[:, 1][mask]
+    probs_np = probs.detach().cpu().numpy()
+    auroc = roc_auc_score(y.detach().cpu().numpy(), probs_np)
+    
     # 2. link prediction performance
-    sample_edge_type = list(edge_index_dict.keys())[0]
-    lp_hits = evaluate_link_prediction(model, data, h_dict, sample_edge_type, k=10)
-
-    return acc, lp_hits, r.detach() if r is not None else None
+    sample_edge_type = random.sample([et for et in edge_index_dict.keys() if "Patient" not in et], k=20)
+    lp_hits = 0
+    for edge_type in sample_edge_type:
+        lp_hits += evaluate_link_prediction(model, data, h_dict, edge_type, k=10)
+    
+    return {'accuracy':acc, 
+            'f1_score': f1, 
+            'auroc': auroc, 
+            'hits@10': lp_hits/len(sample_edge_type)}
 
 @torch.no_grad()
 def evaluate_link_prediction(model, data, h_dict, edge_type, k=10):
@@ -158,44 +188,59 @@ def evaluate_link_prediction(model, data, h_dict, edge_type, k=10):
 
 # Training Loop
 # ----------------------------------------------------------
-def train(model, data, optimizer, lambdas, epochs, rule_features, device):
+def train(model, data, optimizer, lambdas, epochs, edge_features, device):
     history = {
         "train_acc": [],
         "val_acc": [],
+        "train_f1": [],
+        "val_f1": [],
+        "train_auroc": [],
+        "val_auroc": [],
         "train_hits@k": [],
         "val_hits@k": [],
         "train_cls_loss": [],
         "train_lp_loss": [],
-        "rule_loss": [],
-        'train_rule':[],
-        'val_rule':[]
+        "regularizer_loss": [],
+        'train_edge_coeffs':[],
     }
 
     best_val_acc = 0.0
     best_state = None
-
+    edge_index_dict = {edge_type: data[edge_type].edge_index for edge_type in data.edge_types}
+    edge_features = get_edge_features(data=data)
     for epoch in trange(epochs, desc="Training"):
         
         # train step
         current_lambdas = lambdas.get_lambdas(epoch)
-        total_loss, cls_loss, lp_loss, r_loss = train_step(model, data, rule_features, optimizer, current_lambdas)
+        epoch_results = train_epoch(
+            model=model,
+            data=data,
+            edge_index_dict=edge_index_dict,
+            edge_features = edge_features,
+            optimizer=optimizer,
+            lambdas=current_lambdas
+            )
 
         # ---- Evaluation ----
-        train_acc, train_hits, train_r = evaluate(model, data, rule_features,data['Patient'].train_mask)
-        val_acc,  val_hits, val_r = evaluate(model, data, rule_features,data['Patient'].val_mask)
+        train_metrics  = evaluate(model, data, edge_features,data['Patient'].train_mask)
+        val_metrics = evaluate(model, data, edge_features,data['Patient'].val_mask)
 
-        history["train_acc"].append(train_acc)
-        history["val_acc"].append(val_acc)
-        history['train_hits@k'].append(train_hits)
-        history['val_hits@k'].append(val_hits)
-        history["train_cls_loss"].append(cls_loss)
-        history["train_lp_loss"].append(lp_loss)
-        history['rule_loss'].append(r_loss)
-        history["train_rule"].append(train_r)
-        history["val_rule"].append(val_r)
+        history["train_acc"].append(train_metrics['accuracy'])
+        history["val_acc"].append(val_metrics['accuracy'])
+        history['train_hits@k'].append(train_metrics['hits@10'])
+        history['val_hits@k'].append(val_metrics['hits@10'])
+        history['train_f1'].append(train_metrics['f1_score'])
+        history['val_f1'].append(val_metrics['f1_score'])
+        history['train_auroc'].append(train_metrics['auroc'])
+        history['val_auroc'].append(val_metrics['auroc'])
+        history["train_cls_loss"].append(epoch_results['cls_loss'])
+        history["train_lp_loss"].append(epoch_results['lp_loss'])
+        history['regularizer_loss'].append(epoch_results['reg_loss'])
+        history["train_edge_coeffs"].append(epoch_results['edge_coeff'])
+        
 
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        if val_metrics['accuracy'] > best_val_acc:
+            best_val_acc = val_metrics['accuracy']
             best_state = {k: v.cpu() for k, v in model.state_dict().items()}
 
     return best_state, history
@@ -203,11 +248,12 @@ def train(model, data, optimizer, lambdas, epochs, rule_features, device):
 def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, required=True,
-                        choices=['base_gat', 'rule_gat', 'hgt'])
+                        choices=['base_gat', 'fuzzy_gat', 'hgt'])
     parser.add_argument('--patient_graph', type=str, default="./data/KG/patient_kg.pkl")
     
     parser.add_argument('--output_dir', type=str, default='results')
-    parser.add_argument('--epochs', type=int, default=200)
+    parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--lr', type=float, default=0.005)
     
 
     args = parser.parse_args()
@@ -228,7 +274,7 @@ def main():
     data, new_node_mappings = networkx_to_hetero_data(G)
     data.to(device)
     # 3. compute relevance_rule_features
-    relevance_features = compute_rule_features(data)
+    relevance_features = get_edge_features(data)
 
     # 4. define model
     model = get_hetero_model(
@@ -238,13 +284,13 @@ def main():
         out_channels=2,
         heads=2,
         dropout_rate=0.5,
-        num_rules=2
+        num_features=2
     ).to(device)
 
     optimizer = torch.optim.Adam(
         model.parameters(),
-        lr=args.lr,
-        weight_decay=args.weight_decay
+        lr=0.001,
+        weight_decay=5e-4
     )
     # Usage in your training loop:
     scheduler = LambdaScheduler(total_epochs=args.epochs)
@@ -269,7 +315,7 @@ def main():
     print('Training history')
     for k,v in history.items():
         print(f"{k} : {v}")
-        print(f"{k} : Min = {min(v)}, Max = {max(v)}\n")
+        print()
 
 if __name__=="__main__":
      main()

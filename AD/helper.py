@@ -323,6 +323,25 @@ def networkx_to_hetero_data(graph: nx.MultiDiGraph) -> Tuple[HeteroData, Dict[st
     print("Conversion complete!")
     return data, node_mappings
 
+def get_edge_features(data:HeteroData) -> torch.Tensor:
+    """Here edge features include protein_relevance and expression values.
+    and they are converted according to (patient express protein).
+
+    Args:
+        data (HeteroData): _description_
+
+    Returns:
+        Tensor[num_edges, num_features]: _description_
+    """
+    # prepare edge_features
+    # protein_relevance
+    patient_idx, protein_idx = data[('Patient', 'express', 'Protein')].edge_index
+    protien_relevances = data['Protein'].relevance[protein_idx]
+    edge_weights = data[('Patient', 'express', 'Protein')].edge_weight
+
+    edge_features = torch.stack([protien_relevances, edge_weights], dim=1)
+    return edge_features
+
 def compute_rule_features(data,relevance_threshold:float=0.05) -> torch.Tensor:
 
     patient_idx, protein_idx = data[('Patient', 'express', 'Protein')].edge_index
