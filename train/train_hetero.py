@@ -21,13 +21,13 @@ except NameError:
     base_dir = os.getcwd()
 sys.path.append(os.path.dirname(base_dir))
 
-from helper import (
+from utils.helper import (
     networkx_to_hetero_data,
     get_edge_features,
     get_device,
     set_random_seeds
 )
-from AD.hetero_fuzzy_models import get_hetero_model
+from hetero_models.hetero_fuzzy_models import get_hetero_model
 
 # Training Step
 # --------------------------------------------------------------------

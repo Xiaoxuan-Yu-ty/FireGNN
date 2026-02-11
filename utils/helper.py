@@ -31,7 +31,10 @@ def extract_hgnc(node_id):
     match = re.search(r'HGNC:"([^"]+)"\)', node_id)
     return match.group(1) if match else ""
 
-def add_patient_to_kg(kg:nx.MultiDiGraph, exp:pd.DataFrame, labels: list, output_filename:str):
+def add_patient_to_kg(kg:nx.MultiDiGraph, 
+                      exp:pd.DataFrame, 
+                      labels: list, 
+                      output_filename:str=None)->Tuple[nx.MultiDiGraph,set]:
     """Add patients to KG with gene-expression-value as edge_weight, 
     create edges between patients and all overlapping HGNC-proteins .
 
@@ -77,8 +80,9 @@ def add_patient_to_kg(kg:nx.MultiDiGraph, exp:pd.DataFrame, labels: list, output
     print(f'The number of mapped protein-nodes is {len(mapped_nodes)}')
     
     # save graph
-    with open(output_filename, 'wb') as f:
-        pickle.dump(G, f)
+    if output_filename:
+        with open(output_filename, 'wb') as f:
+            pickle.dump(G, f)
     print('-------------------------- Done ------------------------------')
     return G, mapped_nodes
 
@@ -140,7 +144,7 @@ def get_shortest_path(kg:nx.MultiDiGraph, target_node: str = 'path(MESH:"Alzheim
             shortest_paths[node_type].append(None)
     return shortest_paths
 
-def get_node_relevance(kg,kg_embed, node_mappings, method:str, output_type:str='list'):
+def get_node_relevance(kg,kg_embed, node_mappings, method:str):
 
     if method == 'shortest path':
         node_relevances = get_shortest_path(kg)
