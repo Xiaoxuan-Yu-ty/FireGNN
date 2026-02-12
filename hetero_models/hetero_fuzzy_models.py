@@ -72,13 +72,13 @@ class HeteroFuzzyGAT(nn.Module):
             for edge_type in data.edge_types
         }))
         self.conv2 = (HeteroConv({
-            edge_type: GATConv(hidden_channels*heads, hidden_channels, heads=1, add_self_loops=False)
+            edge_type: GATConv(hidden_channels*heads, out_channels, heads=1, add_self_loops=False)
             for edge_type in data.edge_types
         }))
       
         # Link Prediction Head 
         self.rel_weights = nn.ParameterDict({
-            "__".join(edge_type): nn.Parameter(torch.ones(hidden_channels))
+            "__".join(edge_type): nn.Parameter(torch.ones(out_channels))
             for edge_type in data.edge_types
         })
         for param in self.rel_weights.values():
@@ -86,15 +86,15 @@ class HeteroFuzzyGAT(nn.Module):
         
         # classifier
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_channels * 2, hidden_channels),
+            nn.Linear(out_channels * 2, out_channels),
             nn.ReLU(),
-            nn.Linear(hidden_channels, out_channels)
+            nn.Linear(out_channels, 2)
         )
 
         # edge fuzzy fules to get edge_coeffs
         self.edge_fuzzy_rules = EdgeFuzzyLayer(
             num_features=num_features,
-            patient_emb_dim=hidden_channels
+            patient_emb_dim=out_channels
         )
     
     def forward(self, edge_index_dict, edge_features):
@@ -133,6 +133,7 @@ class HeteroFuzzyGAT(nn.Module):
 
         return h_dict, log_probs, edge_coeffs
     
+    '''
     def decode(self, h_dict, edge_index, edge_type):
         """Link Prediction Decoder: Predicts probability of edges"""
         u_type, rel, v_type = edge_type
@@ -144,6 +145,36 @@ class HeteroFuzzyGAT(nn.Module):
         rel_key = "__".join(edge_type)
         rel_w = self.rel_weights[rel_key]
         return (h_src * rel_w * h_dst).sum(dim=-1)
+    '''
+    
+    def decode(self, h_dict, edge_index, edge_type, batch_size=10000):
+        """
+        Batch-wise decoding to reduce memory usage.
+        """
+        src_type, rel, dst_type = edge_type
+        src_idx, dst_idx = edge_index
+
+        rel_key = "__".join(edge_type)
+        rel_w = self.rel_weights[rel_key]  # shape: [D]
+
+        num_edges = src_idx.size(0)
+        scores = []
+
+        for start in range(0, num_edges, batch_size):
+            end = start + batch_size
+
+            batch_src = src_idx[start:end]
+            batch_dst = dst_idx[start:end]
+
+            h_src = h_dict[src_type][batch_src]   # [B, D]
+            h_dst = h_dict[dst_type][batch_dst]   # [B, D]
+
+            # broadcasting rel_w: [D] -> [B, D]
+            batch_score = (h_src * rel_w * h_dst).sum(dim=-1)
+
+            scores.append(batch_score)
+
+        return torch.cat(scores, dim=0)
     
     def get_learned_rules(self):
         return {
@@ -151,13 +182,14 @@ class HeteroFuzzyGAT(nn.Module):
             "feature sharpness": self.edge_fuzzy_rules.alpha
         }
     
+    
 class PerEdgeFuzzyLayer(nn.Module):
 
     def __init__(self, num_edges, num_features=2):
         super().__init__()
 
         # initialize edge_coeff as 0.5
-        self.edge_base_coeffs = nn.Parameter(torch.ones(num_edges)*5)
+        self.edge_base_coeffs = nn.Parameter(torch.ones(num_edges)*0.5)
 
         # fuzzy rule thresholds and sharpness
         self. theta = nn.Parameter(torch.zeros(num_features))
@@ -191,13 +223,13 @@ class HeteroFuzzyGAT_PerEdge(nn.Module):
             for edge_type in data.edge_types
         }))
         self.conv2 = (HeteroConv({
-            edge_type: GATConv(hidden_channels*heads, hidden_channels, heads=1, add_self_loops=False)
+            edge_type: GATConv(hidden_channels*heads, out_channels, heads=1, add_self_loops=False)
             for edge_type in data.edge_types
         }))
       
         # Link Prediction Head 
         self.rel_weights = nn.ParameterDict({
-            "__".join(edge_type): nn.Parameter(torch.ones(hidden_channels))
+            "__".join(edge_type): nn.Parameter(torch.ones(out_channels))
             for edge_type in data.edge_types
         })
         for param in self.rel_weights.values():
@@ -205,9 +237,9 @@ class HeteroFuzzyGAT_PerEdge(nn.Module):
         
         # classifier
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_channels * 2, hidden_channels),
+            nn.Linear(out_channels * 2, out_channels),
             nn.ReLU(),
-            nn.Linear(hidden_channels, out_channels)
+            nn.Linear(out_channels, 2)
         )
 
         # edge fuzzy fules to get edge_coeffs
@@ -251,17 +283,34 @@ class HeteroFuzzyGAT_PerEdge(nn.Module):
 
         return h_dict, log_probs, edge_coeffs
     
-    def decode(self, h_dict, edge_index, edge_type):
-        """Link Prediction Decoder: Predicts probability of edges"""
-        u_type, rel, v_type = edge_type
-        src, dst = edge_index
-        
-        h_src = h_dict[u_type][src]
-        h_dst = h_dict[v_type][dst]
-        
+    def decode(self, h_dict, edge_index, edge_type, batch_size=10000):
+        """
+        Batch-wise decoding to reduce memory usage.
+        """
+        src_type, rel, dst_type = edge_type
+        src_idx, dst_idx = edge_index
+
         rel_key = "__".join(edge_type)
-        rel_w = self.rel_weights[rel_key]
-        return (h_src * rel_w * h_dst).sum(dim=-1)
+        rel_w = self.rel_weights[rel_key]  # shape: [D]
+
+        num_edges = src_idx.size(0)
+        scores = []
+
+        for start in range(0, num_edges, batch_size):
+            end = start + batch_size
+
+            batch_src = src_idx[start:end]
+            batch_dst = dst_idx[start:end]
+
+            h_src = h_dict[src_type][batch_src]   # [B, D]
+            h_dst = h_dict[dst_type][batch_dst]   # [B, D]
+
+            # broadcasting rel_w: [D] -> [B, D]
+            batch_score = (h_src * rel_w * h_dst).sum(dim=-1)
+
+            scores.append(batch_score)
+
+        return torch.cat(scores, dim=0)
     
     def get_learned_rules(self):
         return {
@@ -282,7 +331,7 @@ class HeteroFuzzyGAT_PerEdge(nn.Module):
     
 
 class HeteroGAT(nn.Module):
-    def __init__(self, data, hidden_channels, out_channels, heads, dropout_rate, num_rules=5):
+    def __init__(self, data, hidden_channels, out_channels, heads, dropout_rate, num_features=None):
         super().__init__()
 
         self.data = data
@@ -301,24 +350,24 @@ class HeteroGAT(nn.Module):
             for edge_type in data.edge_types
         }))
         self.conv2 = (HeteroConv({
-            edge_type: GATConv(hidden_channels*heads, hidden_channels, heads=1, concat=False, add_self_loops=False)
+            edge_type: GATConv(hidden_channels*heads, out_channels, heads=1, concat=False, add_self_loops=False)
             for edge_type in data.edge_types
         }))
         
         # 2. Link Prediction Head 
         self.rel_weights = nn.ParameterDict({
-            "__".join(edge_type): nn.Parameter(torch.ones(hidden_channels))
+            "__".join(edge_type): nn.Parameter(torch.ones(out_channels))
             for edge_type in data.edge_types
         })
         
         # 3. classifier
         self.classifier = self.classifier = nn.Sequential(
-            nn.Linear(hidden_channels, hidden_channels),
+            nn.Linear(out_channels, out_channels),
             nn.ReLU(),
-            nn.Linear(hidden_channels, out_channels)
+            nn.Linear(out_channels, 2)
         )
 
-    def forward(self,edge_index_dict):
+    def forward(self,edge_index_dict, edge_features=None):
         # --- Neural Phase ---
         # Pass messages across the whole KG
         x_dict = {
@@ -362,7 +411,7 @@ def get_hetero_model(model_type, data, hidden_channels, out_channels, **kwargs):
     Factory function to create hetero rule-enhanced fuzzy models.
     
     Args:
-        model_type: Type of model ('base_gat', 'rule_gat', 'hgt')
+        model_type: Type of model ('base_gat', 'fuzzy_gat', 'per_edge_gat', 'hgt')
         hidden_channels: Hidden layer dimension
         out_channels: Output dimension (number of classes)
         **kwargs: Additional arguments for model initialization
@@ -376,6 +425,8 @@ def get_hetero_model(model_type, data, hidden_channels, out_channels, **kwargs):
         return HeteroGAT(data, hidden_channels, out_channels, **kwargs)
     elif model_type == 'fuzzy_gat':
         return HeteroFuzzyGAT(data,hidden_channels, out_channels, **kwargs)
+    elif model_type == 'per_edge_gat':
+        return HeteroFuzzyGAT_PerEdge(data, hidden_channels, out_channels, **kwargs)
     elif model_type == 'hgt':
         return HeteroFuzzyHGT(data, hidden_channels, out_channels, **kwargs)
     else:

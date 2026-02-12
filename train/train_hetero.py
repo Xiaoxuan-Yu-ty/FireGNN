@@ -1,6 +1,12 @@
 """
 Training script for edge-level learnable coefficients HeteroFuzzyGNN models.
 """
+import copy
+import os
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+import sys
+import gc
+
 import argparse
 import pickle
 import random
@@ -9,11 +15,8 @@ from sklearn.metrics import f1_score, roc_auc_score
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-import os
-import sys
-
 from tqdm import trange
+
 # Add parent directory to path for imports
 try:
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -31,67 +34,74 @@ from hetero_models.hetero_fuzzy_models import get_hetero_model
 
 # Training Step
 # --------------------------------------------------------------------
-def train_epoch(model, data, edge_index_dict, edge_features, optimizer, lambdas):
+def train_epoch(model, data, edge_index_dict, edge_features, optimizer, lambdas, scaler):
     model.train()
     optimizer.zero_grad()
-    # 1. forward Pass
-    h_dict, log_probs, edge_coeffs = model(edge_index_dict, edge_features)
-    
-    data['Patient'].y = torch.as_tensor(data['Patient'].y).long().squeeze()
-    # 2. classification Loss 
-
-    target = data['Patient'].y[data['Patient'].train_mask]
-    counts = torch.bincount(target)
-    weights = 1.0 / counts.float()
-    weights = weights / weights.sum() # Normalize
-
-    loss_cls = F.nll_loss(
-        log_probs[data['Patient'].train_mask], 
-        target, 
-        weight=weights # Add weight here
-    )
-
-    #loss_cls = F.nll_loss(log_probs[data['Patient'].train_mask], data['Patient'].y[data['Patient'].train_mask])
-    
-    # 3. link prediction loss
-    loss_lp = 0
-    for edge_type in edge_index_dict.keys():
-        pos_edge_index = edge_index_dict[edge_type]
+    # mixed prediction forward: to reduce memory
+    with torch.amp.autocast():
+        # 1. forward Pass
+        h_dict, log_probs, edge_coeffs = model(edge_index_dict, edge_features)
         
-        # Positive Scores
-        pos_scores = model.decode(h_dict, pos_edge_index, edge_type)
-        
-        # Negative Sampling: Randomly shuffle destination nodes
-        neg_edge_index = pos_edge_index.clone()
-        num_nodes_v = data[edge_type[2]].num_nodes
-        neg_edge_index[1] = torch.randint(0, num_nodes_v, (pos_edge_index.size(1),))
-        
-        #neg_edge_index[1] = neg_edge_index[1][torch.randperm(neg_edge_index.size(1))]
-        neg_scores = model.decode(h_dict, neg_edge_index, edge_type)
-        
-        # Ranking Loss: Encourage pos_scores > neg_scores
-        loss_lp += -torch.log(torch.sigmoid(pos_scores - neg_scores) + 1e-15).mean()
-    
-    loss_lp = loss_lp / len(data.edge_types) # to prevent link prediction loss becomes too huge
+        data['Patient'].y = torch.as_tensor(data['Patient'].y).long().squeeze()
+        # 2. classification Loss 
 
-    # 4. regularizer to ensure rule activations to be 'decisive' (near 0 or 1, not 0.5)
-    loss_reg = torch.mean(edge_coeffs * (1 - edge_coeffs)) 
+        target = data['Patient'].y[data['Patient'].train_mask]
+        counts = torch.bincount(target)
+        weights = 1.0 / counts.float()
+        weights = weights / weights.sum() # Normalize
 
-    # 5. Combined Total Loss
-    total_loss = (lambdas['cls'] * loss_cls + 
-                  lambdas['lp'] * loss_lp + 
-                  lambdas['reg'] * loss_reg)
-    print(total_loss.grad_fn)
-    
-    total_loss.backward()
+        loss_cls = F.nll_loss(
+            log_probs[data['Patient'].train_mask], 
+            target, 
+            weight=weights # Add weight here
+        )
+
+        #loss_cls = F.nll_loss(log_probs[data['Patient'].train_mask], data['Patient'].y[data['Patient'].train_mask])
+        
+        # 3. link prediction loss
+        loss_lp = 0
+        for edge_type in edge_index_dict.keys():
+            pos_edge_index = edge_index_dict[edge_type]
+            
+            # Positive Scores
+            pos_scores = model.decode(h_dict, pos_edge_index, edge_type)
+            
+            # Negative Sampling: Randomly shuffle destination nodes
+            neg_edge_index = pos_edge_index.clone()
+            num_nodes_v = data[edge_type[2]].num_nodes
+            neg_edge_index[1] = torch.randint(0, num_nodes_v, (pos_edge_index.size(1),))
+            
+            #neg_edge_index[1] = neg_edge_index[1][torch.randperm(neg_edge_index.size(1))]
+            neg_scores = model.decode(h_dict, neg_edge_index, edge_type)
+            
+            # Ranking Loss: Encourage pos_scores > neg_scores
+            loss_lp += -torch.log(torch.sigmoid(pos_scores - neg_scores) + 1e-15).mean()
+        
+        loss_lp = loss_lp / len(data.edge_types) # to prevent link prediction loss becomes too huge
+        total_loss = (lambdas['cls'] * loss_cls + 
+                    lambdas['lp'] * loss_lp)
+
+        # 4. regularizer to ensure rule activations to be 'decisive' (near 0 or 1, not 0.5)
+        if edge_coeffs is not None:
+            loss_reg =  torch.mean(edge_coeffs * (1 - edge_coeffs)) 
+
+            # 5. Combined Total Loss
+            total_loss = (lambdas['cls'] * loss_cls + 
+                        lambdas['lp'] * loss_lp + 
+                    lambdas['reg'] * loss_reg)
+        #print(total_loss.grad_fn)
+    # scaled backward   
+    scaler.scale(total_loss).backward()
+    # prevent exploding gradients
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-    optimizer.step()
+    scaler.step(optimizer)
+    scaler.update()
 
     results = {
         'total_loss': total_loss.item(),
         'cls_loss': loss_cls.item(),
         'lp_loss': loss_lp.item(),
-        'reg_loss': loss_reg.item(),
+        'reg_loss': loss_reg.item() if edge_coeffs is not None else None,
         'edge_coeff': edge_coeffs,
     }
     
@@ -105,17 +115,17 @@ class LambdaScheduler:
     def get_lambdas(self, epoch):
         # Phase 1: Warming up the KG (Epoch 0-20)
         if epoch < 100:
-            return {'cls': 0.1, 'lp': 1.0, 'reg': 0.0}
+            return {'cls': 0.1, 'lp': 1.0, 'reg': 0.1}
         
         # Phase 2: Shift focus to Classification (Epoch 21-100)
         elif epoch < 200:
             # Linear ramp for classification: from 0.1 to 1.0
             cls_val = 0.1 + (0.9 * (epoch - 20) / 80)
-            return {'cls': cls_val, 'lp': 0.5, 'reg': 0.005}
+            return {'cls': cls_val, 'lp': 0.5, 'reg': 0.5}
         
         # Phase 3: Sharpen the Symbolic Rules (Epoch 100+)
         else:
-            return {'cls': 1.0, 'lp': 0.1, 'reg': 0.02}
+            return {'cls': 1.0, 'lp': 0.1, 'reg': 0.8}
 
 # Evaluation (on classification + link prediction)
 # ----------------------------------------------------------
@@ -125,7 +135,7 @@ def evaluate(model, data, rule_features, mask):
 
     # 1. classfication performance
     edge_index_dict = {edge_type: data[edge_type].edge_index for edge_type in data.edge_types}
-    h_dict, log_probs, edge_coeffs, rule_activations, patient_weights = model(edge_index_dict, rule_features)
+    h_dict, log_probs, edge_coeffs = model(edge_index_dict, rule_features)
     
     y = torch.as_tensor(data['Patient'].y).long().squeeze()[mask]
     preds = log_probs.argmax(dim=1)[mask]
@@ -203,11 +213,13 @@ def train(model, data, optimizer, lambdas, epochs, edge_features, device):
         "regularizer_loss": [],
         'train_edge_coeffs':[],
     }
-
+    scaler = torch.amp.GradScaler()
     best_val_acc = 0.0
-    best_state = None
+    #best_state = copy.deepcopy(model.state_dict())
+    best_state=None
     edge_index_dict = {edge_type: data[edge_type].edge_index for edge_type in data.edge_types}
     edge_features = get_edge_features(data=data)
+    # ---- Taining loops ------
     for epoch in trange(epochs, desc="Training"):
         
         # train step
@@ -218,10 +230,12 @@ def train(model, data, optimizer, lambdas, epochs, edge_features, device):
             edge_index_dict=edge_index_dict,
             edge_features = edge_features,
             optimizer=optimizer,
-            lambdas=current_lambdas
+            lambdas=current_lambdas,
+            scaler=scaler
             )
 
         # ---- Evaluation ----
+        model.eval()
         train_metrics  = evaluate(model, data, edge_features,data['Patient'].train_mask)
         val_metrics = evaluate(model, data, edge_features,data['Patient'].val_mask)
 
@@ -242,17 +256,18 @@ def train(model, data, optimizer, lambdas, epochs, edge_features, device):
         if val_metrics['accuracy'] > best_val_acc:
             best_val_acc = val_metrics['accuracy']
             best_state = {k: v.cpu() for k, v in model.state_dict().items()}
+        #model.load_state_dict(best_state)
 
     return best_state, history
 
 def parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True,
-                        choices=['base_gat', 'fuzzy_gat', 'hgt'])
-    parser.add_argument('--patient_graph', type=str, default="./data/KG/patient_kg.pkl")
+    parser.add_argument('--model', type=str, default='per_edge_gat',
+                        choices=['base_gat', 'fuzzy_gat', 'per_edge_gat', 'hgt'])
+    parser.add_argument('--patient_graph', type=str, default="../AD/data/patient_kg.pkl")
     
-    parser.add_argument('--output_dir', type=str, default='results')
-    parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--output_dir', type=str, default='../results')
+    parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--lr', type=float, default=0.005)
     
 
@@ -264,9 +279,13 @@ def main():
     set_random_seeds(42)
     device = get_device()
 
-    patient_kg_path = args.patient_graph
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    
 
     # 1. load graph, expression data and design
+    patient_kg_path = args.patient_graph
     with open(patient_kg_path, 'rb') as f:
         G = pickle.load(f) # patient_kg
     
@@ -281,7 +300,7 @@ def main():
         model_type=args.model,
         data=data,
         hidden_channels=128,
-        out_channels=2,
+        out_channels=64,
         heads=2,
         dropout_rate=0.5,
         num_features=2
