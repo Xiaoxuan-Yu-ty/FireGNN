@@ -3,3 +3,14 @@ datasets/
 work report
 AD/results
 results/s
+results/base_gat/best_state.pt
+results/base_gat/history.pt
+results/fuzzy_gat/best_state.pt
+results/fuzzy_gat/history.pt
+results/per_edge_gat/best_state.pt
+results/per_edge_gat/history.pt
+results/compositePat_gcn_fuzzy/fuzzy_params.pt
+results/compositePat_gcn_fuzzy/fuzzy_rules.pt
+results/compositePat_gcn_fuzzy/metrics.json
+results/compositePat_gcn_fuzzy/model.pt
+results/compositePat_gcn_fuzzy/predictions.pt
