@@ -289,11 +289,10 @@ class RMPGAT(nn.Module):
                 out_dict[node_type] = x_dict[node_type]
         return out_dict
     
-    def forward(self, edge_index_dict, initial_relevance_dict, edge_weight_dict):
+    def forward(self, edge_index_dict, edge_weight_dict):
 
         x_dict = {node_type: emb.weight for node_type, emb in self.embeddings.items()}
-        # initialise relevance scores
-        self.initialize_relevances(initial_relevance_dict, data)
+        
         relevance_dict = {
             node_type: params.clone()
             for node_type, params in self.relevance_params.items()
@@ -342,3 +341,21 @@ class RMPGAT(nn.Module):
                 for edge_type, weight in layer.edge_type_weight.items()
             }
         return weights
+
+def get_hetero_model(model_type, data, in_channels, hidden_channels, out_channels, **kwargs):
+    """
+    Factory function to create hetero rule-enhanced fuzzy models.
+    
+    Args:
+        model_type: Type of model ('base_gat', 'rmp_gat')
+        hidden_channels: Hidden layer dimension
+        out_channels: Output dimension (number of classes)
+        **kwargs: Additional arguments for model initialization
+        
+    Returns:
+        nn.Module: Initialized fuzzy model
+    """
+    model_type = model_type.lower()
+    
+    #if model_type == 'rmp_gat':
+    return RMPGAT(data, in_channels, hidden_channels, out_channels, **kwargs)
