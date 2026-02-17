@@ -14,3 +14,4 @@ results/compositePat_gcn_fuzzy/fuzzy_rules.pt
 results/compositePat_gcn_fuzzy/metrics.json
 results/compositePat_gcn_fuzzy/model.pt
 results/compositePat_gcn_fuzzy/predictions.pt
+results/rmp_gat
