@@ -104,9 +104,9 @@ def train_epoch(model,
     scaler.update()
 
     result = {
-        'total_loss': total_loss.detach.item(),
-        'cls_loss': loss_cls.detach.item(),
-        'lp_loss': loss_lp.detach.item(),
+        'total_loss': total_loss.detach().item(),
+        'cls_loss': loss_cls.detach().item(),
+        'lp_loss': loss_lp.detach().item(),
         'relevance_history': relevance_history
     }
     return result
@@ -180,7 +180,7 @@ def evaluate(model, data, edge_index_dict, edge_weight_dict, mask,device)->Dict:
     h_dict, log_probs, relevance_history = model(edge_index_dict, edge_weight_dict)
 
     # 1. classification performance
-    y = torch.as_tensor(data['Patient'].y).long().squeeze()[mask]
+    y = torch.as_tensor(data['Patient'].y[mask]).long().squeeze()
     preds = log_probs.argmax(dim=1)[mask] # -> [N] of 0 or 1, hard classification
     correct = (preds == y).sum().item()
     acc = correct/mask.sum().item()
@@ -189,7 +189,7 @@ def evaluate(model, data, edge_index_dict, edge_weight_dict, mask,device)->Dict:
     precision_score = precision(preds,y)
     specificity_score = specificity(preds,y)
 
-    preds_exp = torch.exp(log_probs)[:,1] # -> [N] of (0,1) probabilities of disease class
+    preds_exp = torch.exp(log_probs)[:,1][mask] # -> [N] of (0,1) probabilities of disease class
     auroc_score = auroc(preds_exp,y)
     auprc_score = auprc(preds_exp,y)
 
@@ -203,7 +203,7 @@ def evaluate(model, data, edge_index_dict, edge_weight_dict, mask,device)->Dict:
         'recall (tp/(tp+fn))': recall_score,
         'precision (tp/(tp+fp))': precision_score,
         'specificity (tn/(tn+fp))': specificity_score,
-        'auroc':auprc_score,
+        'auroc':auroc_score,
         'auprc':auprc_score,
         'hits@10':lp_hits
     }
@@ -254,7 +254,7 @@ def objective(
 
     # prepare model forward input
     edge_index_dict = {et: data[et].edge_index for et in data.edge_types}
-    initial_relevance_dict = {nt: data[nt].relevance for nt in data.node_types}
+    initial_relevance_dict = {nt: data[nt].relevance for nt in data.node_types if nt != 'Patient'}
     edge_weight_dict = {}
     for edge_type in data.edge_types:
         if 'Patient' in edge_type:
@@ -372,12 +372,12 @@ def test_model(model_type:str,
                                     optimizer,
                                     scaler,
                                     current_lambdas,
-                                    data['Patient'].train_mask,
+                                    ~data['Patient'].test_mask,
                                     device,
                                     negative_ratio=best_params['negative_ratio'])
         epochs_history.append(epoch_result)
     
-    test_metrics = evaluate(model, data, edge_index_dict,edge_weight_dict, data['Patient'].test_maks, device)
+    test_metrics = evaluate(model, data, edge_index_dict,edge_weight_dict, data['Patient'].test_mask, device)
     
     return test_metrics
 
@@ -388,8 +388,9 @@ def parse():
                         choices=['base_gat', 'rmp_gat'])
     parser.add_argument('--patient_graph', type=str, default="../AD/data/patient_kg.pkl")
     parser.add_argument('--output_dir', type=str, default='../results')
-    parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--epochs', type=int, default=2)
     parser.add_argument("--trials", type=int, default=2)
+    parser.add_argument("--storage", default=None)
     args = parser.parse_args()
     return args
 
@@ -400,7 +401,7 @@ def main():
 
     gc.collect()
     torch.cuda.empty_cache()
-    torch.cuda.reset_peak_memory_stats()
+    #torch.cuda.reset_peak_memory_stats()
     
     output_dir = os.path.join(args.output_dir, args.model)
     os.makedirs(output_dir, exist_ok=True)

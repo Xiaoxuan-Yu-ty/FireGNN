@@ -167,10 +167,10 @@ class RelevanceMessagePassing(MessagePassing):
         edge_weight_expanded = edge_weight.unsqueeze(1) if edge_weight is not None else torch.ones(
             src_scores.size(0), 1
         )
-        print('message passing: relevance and edge weight size')
-        print(src_scores.size())
-        print(dst_scores.size())
-        print(edge_weight_expanded.size())
+        # print('message passing: relevance and edge weight size')
+        # print(src_scores.size())
+        # print(dst_scores.size())
+        # print(edge_weight_expanded.size())
         relevance_input = torch.cat([
             src_scores.view(-1,1), # here the dimension might not match
             dst_scores.view(-1,1),
@@ -206,11 +206,12 @@ class RMPGAT(nn.Module):
         for i in range(num_layers):
             layer_dict = nn.ModuleDict()
             input_dim = in_channels if i == 0 else hidden_channels
+            output_dim = out_channels if i == num_layers-1 else hidden_channels
 
             for edge_type in self.edge_types:
                 layer_dict['__'.join(edge_type)] = RelevanceMessagePassing(
                     in_channels=input_dim,
-                    out_channels=hidden_channels,
+                    out_channels=output_dim,
                     heads=heads
                 )
             self.convs.append(layer_dict)
@@ -224,15 +225,15 @@ class RMPGAT(nn.Module):
 
         # 3. classifier
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_channels, hidden_channels //2),
+            nn.Linear(out_channels, out_channels//2),
             nn.ReLU(),
             nn.Dropout(dropout_rate),
-            nn.Linear(hidden_channels //2, out_channels)
+            nn.Linear(out_channels//2, 2)
         )
 
         # 4. Link Prediction Head 
         self.rel_weights = nn.ParameterDict({
-            "__".join(edge_type): nn.Parameter(torch.ones(hidden_channels))
+            "__".join(edge_type): nn.Parameter(torch.ones(out_channels))
             for edge_type in self.edge_types
         })
         for param in self.rel_weights.values():
