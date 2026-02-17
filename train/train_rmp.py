@@ -340,9 +340,9 @@ def test_model(model_type:str,
                              in_channels=best_params['in_channels'],
                              hidden_channels=best_params['hidden_channels'],
                              out_channels=best_params['out_channels'],
-                             num_layers=best_params['num_layers'],
+                             num_layers=3,
                              heads = best_params['heads'],
-                             dropout_rate = best_params['dropout_rate']
+                             dropout_rate = best_params['dropout']
                              ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=best_params['lr'], weight_decay=best_params['weight_decay'])
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=20)
@@ -351,7 +351,7 @@ def test_model(model_type:str,
 
     # prepare model forward input
     edge_index_dict = {et: data[et].edge_index for et in data.edge_types}
-    initial_relevance_dict = {nt: data[nt].relevance for nt in data.node_types}
+    initial_relevance_dict = {nt: data[nt].relevance for nt in data.node_types if nt != 'Patient'}
     edge_weight_dict = {}
     for edge_type in data.edge_types:
         if 'Patient' in edge_type:

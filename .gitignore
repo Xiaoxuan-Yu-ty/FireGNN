@@ -15,3 +15,6 @@ results/compositePat_gcn_fuzzy/metrics.json
 results/compositePat_gcn_fuzzy/model.pt
 results/compositePat_gcn_fuzzy/predictions.pt
 results/rmp_gat
+results/rmp_gat/train_result_trial0.pt
+results/rmp_gat/train_result_trial0.pt
+results/rmp_gat/val_metrics_trail0.pt
