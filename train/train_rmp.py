@@ -97,8 +97,9 @@ def train_epoch(model,
         loss_lp = loss_lp / num_edeg_types
 
         total_loss = lambdas['cls'] * loss_cls + lambdas['lp'] * loss_lp
-    # scaled backward to manage memory. 
-    scaler.scale(total_loss).backward
+    # scaled backward to manage memory.
+    scaler.scale(total_loss).backward()
+    scaler.unscale_(optimizer)
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     scaler.step(optimizer)
     scaler.update()
@@ -133,65 +134,76 @@ class LambdaScheduler:
 
 # ====== Evaluation =====
 @torch.no_grad()
-def evaluate_link_prediction(model, 
-                             data: HeteroData,
-                             edge_index_dict:Dict, 
-                             h_dict:Dict,
-                             device:torch.device,  
-                             k=10)->float:
+def evaluate_link_prediction(model, data, edge_index_dict, h_dict, device, k=10) -> float:
     model.eval()
-    # sample edge_types to reduce computation cost
-    sampled_edge_types = random.sample([et for et in edge_index_dict.keys() if 'Patient' not in et], k=200)
-    hits = 0.0
-    count = 0.0
+
+    # Filter edge types that aren't related to 'Patient'
+    eligible_types = [et for et in edge_index_dict.keys() if 'Patient' not in et]
+    # Sample to save time (clamping to list size to avoid errors)
+    sampled_edge_types = random.sample(eligible_types, min(len(eligible_types), 200))
+
+    total_hits = 0.0
+    total_count = 0.0
+
     for edge_type in sampled_edge_types:
         src_type, _, dst_type = edge_type
-        pos_edge_index = edge_index_dict[edge_type]
-        for idx in range(pos_edge_index.size(1)):
-            pos_edge_idx = pos_edge_index[:, idx:idx+1]
-            neg_edge_index = negative_sampling(
-                edge_index=pos_edge_idx,
-                num_nodes=(data[src_type].num_nodes, data[dst_type].num_nodes),
-                num_neg_samples=100).to(device)
-            combined_edge_index = torch.cat([pos_edge_idx, neg_edge_index], dim=1)
-            scores = model.decode(h_dict, combined_edge_index, edge_type)
-            pos_score = scores[0]
-            rank = (scores > pos_score).sum().item() + 1
-            if rank <= k:
-                hits += 1
-            count += 1
-    if count == 0:
-        return 0.0      
-    
-    return hits/count
+        # ENSURE pos_edge_index is on the GPU
+        pos_edge_index = edge_index_dict[edge_type].to(device)
+
+        # Batch processing: Instead of looping over every edge, do them all at once!
+        # Generate negative samples for the whole edge type
+        num_neg = pos_edge_index.size(1) * 50
+
+        # PyG negative_sampling usually wants CPU indices for the sampling logic
+        neg_edge_index = negative_sampling(
+            edge_index=pos_edge_index.cpu(),
+            num_nodes=(data[src_type].num_nodes, data[dst_type].num_nodes),
+            num_neg_samples=num_neg
+        ).to(device) # Move result to GPU
+
+        # Calculate scores for ALL positive and ALL negative edges at once
+        pos_scores = model.decode(h_dict, pos_edge_index, edge_type) # [N_pos]
+        neg_scores = model.decode(h_dict, neg_edge_index, edge_type) # [N_neg]
+
+        # Reshape neg_scores to [N_pos, 100] so we can compare each pos to its negs
+        neg_scores = neg_scores.view(pos_edge_index.size(1), 50)
+
+        # Rank: Count how many negative scores are higher than the positive score
+        # pos_scores[:, None] makes it [N_pos, 1] for broadcasting
+        ranks = (neg_scores > pos_scores[:, None]).sum(dim=1) + 1
+
+        total_hits += (ranks <= k).sum().item()
+        total_count += pos_scores.size(0)
+
+    return total_hits / total_count if total_count > 0 else 0.0
 
 @torch.no_grad()
 def evaluate(model, data, edge_index_dict, edge_weight_dict, mask,device)->Dict:
     
     # classification metrics
-    f1 = BinaryF1Score() # input: preds[N], targets[N]
-    auroc = BinaryAUROC() 
-    recall = BinaryRecall()
-    precision = BinaryPrecision()
-    specificity = BinarySpecificity()
-    auprc = BinaryAveragePrecision()
+    f1 = BinaryF1Score().to(device) # input: preds[N], targets[N]
+    auroc = BinaryAUROC().to(device)
+    recall = BinaryRecall().to(device)
+    precision = BinaryPrecision().to(device)
+    specificity = BinarySpecificity().to(device)
+    auprc = BinaryAveragePrecision().to(device)
 
     model.eval()
     h_dict, log_probs, relevance_history = model(edge_index_dict, edge_weight_dict)
 
     # 1. classification performance
-    y = torch.as_tensor(data['Patient'].y[mask]).long().squeeze()
+    y = data['Patient'].y[mask].squeeze().long().to(device)
     preds = log_probs.argmax(dim=1)[mask] # -> [N] of 0 or 1, hard classification
     correct = (preds == y).sum().item()
     acc = correct/mask.sum().item()
-    f1_score = f1(preds,y)
-    recall_score = recall(preds,y)
-    precision_score = precision(preds,y)
-    specificity_score = specificity(preds,y)
+    f1_score = f1(preds,y).item()
+    recall_score = recall(preds,y).item()
+    precision_score = precision(preds,y).item()
+    specificity_score = specificity(preds,y).item()
 
     preds_exp = torch.exp(log_probs)[:,1][mask] # -> [N] of (0,1) probabilities of disease class
-    auroc_score = auroc(preds_exp,y)
-    auprc_score = auprc(preds_exp,y)
+    auroc_score = auroc(preds_exp,y).item()
+    auprc_score = auprc(preds_exp,y).item()
 
 
     # 2. link prediction performance
@@ -249,16 +261,16 @@ def objective(
                              ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10)
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = torch.amp.GradScaler()
     lambdas = LambdaScheduler(total_epochs=epochs)
 
     # prepare model forward input
-    edge_index_dict = {et: data[et].edge_index for et in data.edge_types}
-    initial_relevance_dict = {nt: data[nt].relevance for nt in data.node_types if nt != 'Patient'}
+    edge_index_dict = {et: data[et].edge_index.to(device) for et in data.edge_types}
+    initial_relevance_dict = {nt: data[nt].relevance.to(device) for nt in data.node_types if nt != 'Patient'}
     edge_weight_dict = {}
     for edge_type in data.edge_types:
         if 'Patient' in edge_type:
-            ew = data[edge_type].edge_weight
+            ew = data[edge_type].edge_weight.to(device)
         else:
             ew = None
         edge_weight_dict[edge_type] = ew
@@ -350,12 +362,12 @@ def test_model(model_type:str,
     lambdas = LambdaScheduler(total_epochs=epochs)
 
     # prepare model forward input
-    edge_index_dict = {et: data[et].edge_index for et in data.edge_types}
-    initial_relevance_dict = {nt: data[nt].relevance for nt in data.node_types if nt != 'Patient'}
+    edge_index_dict = {et: data[et].edge_index.to(device) for et in data.edge_types}
+    initial_relevance_dict = {nt: data[nt].relevance.to(device) for nt in data.node_types if nt != 'Patient'}
     edge_weight_dict = {}
     for edge_type in data.edge_types:
         if 'Patient' in edge_type:
-            ew = data[edge_type].edge_weight
+            ew = data[edge_type].edge_weight.to(device)
         else:
             ew = None
         edge_weight_dict[edge_type] = ew
@@ -388,8 +400,8 @@ def parse():
                         choices=['base_gat', 'rmp_gat'])
     parser.add_argument('--patient_graph', type=str, default="../AD/data/patient_kg.pkl")
     parser.add_argument('--output_dir', type=str, default='../results')
-    parser.add_argument('--epochs', type=int, default=2)
-    parser.add_argument("--trials", type=int, default=2)
+    parser.add_argument('--epochs', type=int, default=500)
+    parser.add_argument("--trials", type=int, default=100)
     parser.add_argument("--storage", default=None)
     args = parser.parse_args()
     return args
@@ -401,7 +413,7 @@ def main():
 
     gc.collect()
     torch.cuda.empty_cache()
-    #torch.cuda.reset_peak_memory_stats()
+    torch.cuda.reset_peak_memory_stats()
     
     output_dir = os.path.join(args.output_dir, args.model)
     os.makedirs(output_dir, exist_ok=True)
@@ -443,6 +455,8 @@ def main():
         pickle.dump(best_trial, file)
     
     # test model
+    gc.collect()
+    torch.cuda.empty_cache()
     test_metrics = test_model(args.model,
                               data,
                               best_trial.params,

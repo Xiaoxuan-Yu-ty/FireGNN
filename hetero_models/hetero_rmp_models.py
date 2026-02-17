@@ -47,14 +47,15 @@ class RelevancePropagationLayer(nn.Module):
         Returns:
             new_relevance_dict (dict): {node_type: [num_nodes, 1]}
         """
+        device = next(self.parameters()).device
         # initialize aggregated scores dict
         aggregated_dict = {
-            node_type: torch.zeros_like(scores)
+            node_type: torch.zeros_like(scores, device=device)
             for node_type, scores in relevance_dict.items()
         }
         # count incoming messages per node to average
         message_counts_dict = {
-            node_type: torch.zeros(scores.size(0))
+            node_type: torch.zeros(scores.size(0), device=device)
             for node_type, scores in relevance_dict.items()
         }
         # aggregate relevance from each edge
@@ -63,7 +64,7 @@ class RelevancePropagationLayer(nn.Module):
             src_idx, dst_idx = edge_index[0], edge_index[1]
 
             # old node_relevance scores
-            src_scores = relevance_dict[src_type]
+            src_scores = relevance_dict[src_type].to(device)
             # edge_type weight
             edge_type_key = "__".join(edge_type)
             edge_weight = torch.sigmoid(self.edge_type_weight[edge_type_key])
@@ -74,15 +75,15 @@ class RelevancePropagationLayer(nn.Module):
             )
             # count messages to dst_node
             message_counts_dict[dst_type] = message_counts_dict[dst_type].scatter_add(
-                0, dst_idx, torch.ones(dst_idx.size(0))
+                0, dst_idx, torch.ones(dst_idx.size(0), device=dst_idx.device)
             )
         # average aggregation
         if self.aggr == 'mean':
             for node_type in aggregated_dict.keys():
-                counts = message_counts_dict[node_type]
+                counts = message_counts_dict[node_type].view(-1,1)
                 # counts is a [N] vector, while aggregated_dict[node_type] is [N, 1]
                 # need to be careful of dimension in division.
-                aggregated_dict[node_type] = aggregated_dict[node_type]/counts.view(-1,1)
+                aggregated_dict[node_type] = aggregated_dict[node_type]/counts.clamp(min=1)
         # Update new relevance scores based on aggegated scores and old scores
         new_relevance_dict = {}
         for node_type in relevance_dict.keys():
@@ -160,21 +161,25 @@ class RelevanceMessagePassing(MessagePassing):
 
         # neural attention -> [num_edges, heads]
         # alpha_neural = e_ij = LeakyReLU(a^T[ Wh_i​∣∣ Wh_j ​])
+        att_left = self.att_neural[:, :self.att_neural.size(-1)//2]
+        att_right = self.att_neural[:, self.att_neural.size(-1)//2:]
+
+        # Mathematical equivalent that uses much less memory:
+        #alpha_neural = (x_i * att_left).sum(dim=-1) + (x_j * att_right).sum(dim=-1)
         alpha_neural = (self.att_neural * torch.cat([x_i, x_j], dim=-1)).sum(dim=-1)
-        
+        #print('attension neural:')
+        #print(alpha_neural)        
         # disease_relevance attention
         src_scores, dst_scores = relevance_scores
         edge_weight_expanded = edge_weight.unsqueeze(1) if edge_weight is not None else torch.ones(
             src_scores.size(0), 1
         )
-        # print('message passing: relevance and edge weight size')
-        # print(src_scores.size())
-        # print(dst_scores.size())
-        # print(edge_weight_expanded.size())
+        
+        device = x_j.device
         relevance_input = torch.cat([
-            src_scores.view(-1,1), # here the dimension might not match
-            dst_scores.view(-1,1),
-            edge_weight_expanded # [num_edges, 1]
+            src_scores.view(-1,1).to(device), # here the dimension might not match
+            dst_scores.view(-1,1).to(device),
+            edge_weight_expanded.to(device) # [num_edges, 1]
         ], dim=1)
         alpha_relevance = self.relevance_coeff(relevance_input.float())
 
@@ -244,6 +249,7 @@ class RMPGAT(nn.Module):
         Initialize node_relevances as nn.Parameters.
         The initial relevance for patients are set to 0.
         """
+        device = next(self.parameters()).device
         for node_type in self.node_types:
             if node_type in initial_relevance_dict:
                 init_score = initial_relevance_dict[node_type].clone()
@@ -251,7 +257,7 @@ class RMPGAT(nn.Module):
                 num_nodes = data[node_type].num_nodes
                 init_score = torch.zeros(num_nodes)
             # {node_type: [num_nodes, 1]}
-            self.relevance_params[node_type] = nn.Parameter(init_score.unsqueeze(1))
+            self.relevance_params[node_type] = nn.Parameter(init_score.unsqueeze(1)).to(device)
     
     def apply_one_layer(self, x_dict, edge_index_dict, relevance_dict,
                         edge_weight_dict, layer_idx):
