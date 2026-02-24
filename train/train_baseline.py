@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Training script for fuzzy rule-enhanced FireGNN models.
+Training script for Baseline GNN models.
 """
 
 import argparse
@@ -20,15 +20,11 @@ except NameError:
     base_dir = os.getcwd()
 sys.path.append(os.path.dirname(base_dir))
 from utils.graph_utils import (
-    create_fuzzy_rules,
     load_graph,
     prepare_pytorch_geometric_data,
-    create_fuzzy_rules, 
     get_device,
     set_random_seeds
 )
-
-from fuzzy_models.fuzzy_models import get_fuzzy_model
 from models.baseline_models import get_baseline_model
 
 # Evaluation
@@ -36,11 +32,10 @@ from models.baseline_models import get_baseline_model
 @torch.no_grad()
 def evaluate(model, data, mask):
     model.eval()
-    out, fuzzy_rules = model(
+    out = model(
         data.x,
         data.edge_index,
-        edge_attr=data.edge_attr,
-        topo_features=data.topo_features
+        edge_attr=data.edge_attr
     )
     preds = out.argmax(dim=1)
     true_labels = data.y[mask]
@@ -62,7 +57,7 @@ def evaluate(model, data, mask):
         "AUROC": auroc
         }
 
-    return metrics, loss, preds, fuzzy_rules
+    return metrics, loss, preds
 
 
 # ---------------------------------------------------------
@@ -87,11 +82,10 @@ def train(model, data, optimizer, epochs, device):
         model.train()
         optimizer.zero_grad()
 
-        out, _ = model(
+        out = model(
             data.x,
             data.edge_index,
-            edge_attr=data.edge_attr,
-            topo_features=data.topo_features
+            edge_attr=data.edge_attr
         )
 
         loss = F.nll_loss(out[data.train_mask], data.y[data.train_mask])
@@ -99,8 +93,8 @@ def train(model, data, optimizer, epochs, device):
         optimizer.step()
 
         # ---- Evaluation ----
-        train_metrics, train_loss, _,_ = evaluate(model, data, data.train_mask)
-        val_metrics, val_loss, _,_ = evaluate(model, data, data.val_mask)
+        train_metrics, train_loss, _ = evaluate(model, data, data.train_mask)
+        val_metrics, val_loss, _ = evaluate(model, data, data.val_mask)
 
         history["train_acc"].append(train_metrics['Accuracy'])
         history["val_acc"].append(val_metrics['Accuracy'])
@@ -125,8 +119,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='gat',
                         choices=['gcn', 'gat', 'gin'])
-    parser.add_argument('--dataset', type=str, default='Composite-k30', choices=['Expression','Composite','Embedding'])
-    parser.add_argument('--graph_file', type=str, default="../AD/data/composite_patient_k30.pkl")
+    parser.add_argument('--dataset', type=str, default='Composite', choices=['NormExpression','Composite','RawExpression'])
+    parser.add_argument('--graph_file', type=str, default="../AD/data/composite_patient_k16.pkl")
     parser.add_argument('--output_dir', type=str, default='../results')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--hidden_channels', type=int, default=64)
@@ -149,12 +143,11 @@ def main():
     out_channels = int(data.y.max().item() + 1)
 
     # prepare input for training
-    model = get_fuzzy_model(
+    model = get_baseline_model(
         model_type=args.model,
         in_channels=in_channels,
         hidden_channels=args.hidden_channels,
-        out_channels=out_channels,
-        num_rules=args.num_rules
+        out_channels=out_channels
     ).to(device)
 
     optimizer = torch.optim.Adam(
@@ -162,22 +155,6 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay
     )
-    
-    # Initialize Centers and Width (Gaussian way)
-    topo_features_np = data.topo_features.cpu().numpy()
-
-    centers, widths = create_fuzzy_rules(
-    topo_features_np,
-    num_rules=model.num_rules
-    )
-
-    with torch.no_grad():
-        model.fuzzy_layer.centers.copy_(
-            torch.tensor(centers, device=device, dtype=torch.float)
-        )
-        model.fuzzy_layer.log_sigmas.copy_(
-            torch.log(torch.tensor(widths, device=device, dtype=torch.float))
-        )
     
     # train
     best_state, history = train(
@@ -192,7 +169,7 @@ def main():
     model.load_state_dict(best_state)
 
     # final evaluation on test dataset
-    test_metrics, test_loss, test_preds, fuzzy_rules = evaluate(
+    test_metrics, test_loss, test_preds = evaluate(
         model, data, data.test_mask
     )
 
@@ -203,7 +180,7 @@ def main():
     # Save results
     save_dir = os.path.join(
         args.output_dir,
-        f"fuzzy_{args.model}_{args.dataset}"
+        f"baseline_{args.model}_{args.dataset}"
     )
     os.makedirs(save_dir, exist_ok=True)
 
@@ -215,21 +192,6 @@ def main():
         "preds": test_preds.cpu(),
         "labels": data.y.cpu(),
     }, os.path.join(save_dir, "predictions.pt"))
-
-    # Fuzzy rule activations
-    if fuzzy_rules is not None:
-        torch.save(
-            fuzzy_rules.cpu(),
-            os.path.join(save_dir, "fuzzy_rules.pt")
-        )
-
-    # Learned fuzzy parameters
-    fuzzy_params = {
-        "centers": getattr(model.fuzzy_layer, "centers", None),
-        "sigmas": getattr(model.fuzzy_layer, "log_sigmas", None),
-        "rule_weights": getattr(model.fuzzy_layer, "rule_weights", None)
-    }
-    torch.save(fuzzy_params, os.path.join(save_dir, "fuzzy_params.pt"))
 
     # Metrics
     with open(os.path.join(save_dir, "metrics.json"), "w") as f:

@@ -18,3 +18,15 @@ results/rmp_gat
 results/rmp_gat/train_result_trial0.pt
 results/rmp_gat/train_result_trial0.pt
 results/rmp_gat/val_metrics_trail0.pt
+results/fuzzy_gat_Composite
+results/fuzzy_gat_NormExpression
+results/fuzzy_gat_RawExpression
+results/baseline_gat_RawExpression
+results/ml_Composite
+results/ml_NormExpression
+results/fuzzy_gat_Composite-k30
+results/baseline_gat_NormExpression
+results/baseline_gat_Composite
+results/ml_LogisticRegression_Composite
+results/ml_RandomForest_Composite
+AD/model_comparison.ipynb
