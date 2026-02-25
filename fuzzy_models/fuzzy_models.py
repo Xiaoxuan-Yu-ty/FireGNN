@@ -379,7 +379,7 @@ def get_fuzzy_model(model_type, in_channels, hidden_channels, out_channels, **kw
     Factory function to create fuzzy rule-enhanced models.
     
     Args:
-        model_type: Type of model ('gcn', 'gat', 'gin')
+        model_type: Type of model ('gcn', 'gat', 'gin','paper_gcn)
         in_channels: Input feature dimension
         hidden_channels: Hidden layer dimension
         out_channels: Output dimension (number of classes)
@@ -392,7 +392,7 @@ def get_fuzzy_model(model_type, in_channels, hidden_channels, out_channels, **kw
     
     if model_type == 'gcn':
         return FuzzyGCN(in_channels, hidden_channels, out_channels, **kwargs)
-    elif model_type =='fuzzy_gcn':
+    elif model_type =='paper_gcn':
         return PaperFuzzyGCN(in_channels, hidden_channels, out_channels, **kwargs)
     elif model_type == 'gat':
         return FuzzyGAT(in_channels, hidden_channels, out_channels, **kwargs)

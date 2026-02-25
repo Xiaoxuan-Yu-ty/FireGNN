@@ -34,8 +34,7 @@ def evaluate(model, data, mask):
     model.eval()
     out = model(
         data.x,
-        data.edge_index,
-        edge_attr=data.edge_attr
+        data.edge_index
     )
     preds = out.argmax(dim=1)
     true_labels = data.y[mask]
@@ -85,7 +84,6 @@ def train(model, data, optimizer, epochs, device):
         out = model(
             data.x,
             data.edge_index,
-            edge_attr=data.edge_attr
         )
 
         loss = F.nll_loss(out[data.train_mask], data.y[data.train_mask])
@@ -98,8 +96,8 @@ def train(model, data, optimizer, epochs, device):
 
         history["train_acc"].append(train_metrics['Accuracy'])
         history["val_acc"].append(val_metrics['Accuracy'])
-        history["train_f1"].append(train_metrics['F1_Score'])
-        history["val_f1"].append(val_metrics['F1_Score'])
+        history["train_f1"].append(train_metrics['F1-Score'])
+        history["val_f1"].append(val_metrics['F1-Score'])
         history["train_auroc"].append(train_metrics['AUROC'])
         history["val_auroc"].append(val_metrics['AUROC'])
         history["train_loss"].append(train_loss)
@@ -119,7 +117,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='gat',
                         choices=['gcn', 'gat', 'gin'])
-    parser.add_argument('--dataset', type=str, default='Composite', choices=['NormExpression','Composite','RawExpression'])
+    parser.add_argument('--dataset', type=str, default='Composite-k16', choices=['Composite-k16', 'Composite-k30','NormExpression','RawExpression'])
     parser.add_argument('--graph_file', type=str, default="../AD/data/composite_patient_k16.pkl")
     parser.add_argument('--output_dir', type=str, default='../results')
     parser.add_argument('--epochs', type=int, default=200)

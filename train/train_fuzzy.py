@@ -39,7 +39,6 @@ def evaluate(model, data, mask):
     out, fuzzy_rules = model(
         data.x,
         data.edge_index,
-        edge_attr=data.edge_attr,
         topo_features=data.topo_features
     )
     preds = out.argmax(dim=1)
@@ -90,7 +89,6 @@ def train(model, data, optimizer, epochs, device):
         out, _ = model(
             data.x,
             data.edge_index,
-            edge_attr=data.edge_attr,
             topo_features=data.topo_features
         )
 
@@ -104,8 +102,8 @@ def train(model, data, optimizer, epochs, device):
 
         history["train_acc"].append(train_metrics['Accuracy'])
         history["val_acc"].append(val_metrics['Accuracy'])
-        history["train_f1"].append(train_metrics['F1_Score'])
-        history["val_f1"].append(val_metrics['F1_Score'])
+        history["train_f1"].append(train_metrics['F1-Score'])
+        history["val_f1"].append(val_metrics['F1-Score'])
         history["train_auroc"].append(train_metrics['AUROC'])
         history["val_auroc"].append(val_metrics['AUROC'])
         history["train_loss"].append(train_loss)
@@ -123,9 +121,9 @@ def train(model, data, optimizer, epochs, device):
 # ---------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='gat',
-                        choices=['gcn', 'gat', 'gin'])
-    parser.add_argument('--dataset', type=str, default='Composite-k30', choices=['Expression','Composite','Embedding'])
+    parser.add_argument('--model', type=str, default='paper_gcn',
+                        choices=['gcn', 'gat', 'gin','paper_gcn'])
+    parser.add_argument('--dataset', type=str, default='RawExpression', choices=['Composite-k16', 'Composite-k30','NormExpression','RawExpression'])
     parser.add_argument('--graph_file', type=str, default="../AD/data/composite_patient_k30.pkl")
     parser.add_argument('--output_dir', type=str, default='../results')
     parser.add_argument('--epochs', type=int, default=200)
@@ -162,23 +160,23 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay
     )
-    
-    # Initialize Centers and Width (Gaussian way)
-    topo_features_np = data.topo_features.cpu().numpy()
+    if args.model != "paper_gcn":
+        # Initialize Centers and Width (Gaussian way)
+        topo_features_np = data.topo_features.cpu().numpy()
 
-    centers, widths = create_fuzzy_rules(
-    topo_features_np,
-    num_rules=model.num_rules
-    )
+        centers, widths = create_fuzzy_rules(
+        topo_features_np,
+        num_rules=model.num_rules
+        )
 
-    with torch.no_grad():
-        model.fuzzy_layer.centers.copy_(
-            torch.tensor(centers, device=device, dtype=torch.float)
-        )
-        model.fuzzy_layer.log_sigmas.copy_(
-            torch.log(torch.tensor(widths, device=device, dtype=torch.float))
-        )
-    
+        with torch.no_grad():
+            model.fuzzy_layer.centers.copy_(
+                torch.tensor(centers, device=device, dtype=torch.float)
+            )
+            model.fuzzy_layer.log_sigmas.copy_(
+                torch.log(torch.tensor(widths, device=device, dtype=torch.float))
+            )
+        
     # train
     best_state, history = train(
         model=model,
@@ -222,13 +220,18 @@ def main():
             fuzzy_rules.cpu(),
             os.path.join(save_dir, "fuzzy_rules.pt")
         )
-
-    # Learned fuzzy parameters
-    fuzzy_params = {
-        "centers": getattr(model.fuzzy_layer, "centers", None),
-        "sigmas": getattr(model.fuzzy_layer, "log_sigmas", None),
-        "rule_weights": getattr(model.fuzzy_layer, "rule_weights", None)
+    if args.model == 'paper_gcn':
+        fuzzy_params = {
+        "theta": getattr(model.fuzzy_layer, "theta", None),
+        "alpha": getattr(model.fuzzy_layer, "alpha", None)
     }
+    else:
+        # Learned fuzzy parameters
+        fuzzy_params = {
+            "centers": getattr(model.fuzzy_layer, "centers", None),
+            "sigmas": getattr(model.fuzzy_layer, "log_sigmas", None),
+            "rule_weights": getattr(model.fuzzy_layer, "rule_weights", None)
+        }
     torch.save(fuzzy_params, os.path.join(save_dir, "fuzzy_params.pt"))
 
     # Metrics
