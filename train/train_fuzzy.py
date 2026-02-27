@@ -41,27 +41,34 @@ def evaluate(model, data, mask):
         data.edge_index,
         topo_features=data.topo_features
     )
-    preds = out.argmax(dim=1)
-    true_labels = data.y[mask]
-    correct = (preds[mask] == true_labels).sum().item()
+    y_preds = out.argmax(dim=1)[mask].detach().cpu().numpy()
+    y_true = data.y[mask].detach().cpu().numpy()
+    correct = (y_preds == y_true).sum().item()
     acc = correct / mask.sum().item()
-    loss = F.nll_loss(out[mask], true_labels).item()
+    loss = F.nll_loss(out[mask], data.y[mask]).item()
 
     # other metrics
-    f1 = f1_score(true_labels.detach().cpu().numpy(), preds[mask].detach().cpu().numpy())
-    probs = torch.exp(out)[:, 1][mask]
+    f1 = f1_score(y_true, y_preds, average='weighted')
+    # auroc
+    probs = torch.exp(out)[mask]
     probs_np = probs.detach().cpu().numpy()
-    auroc = roc_auc_score(true_labels.detach().cpu().numpy(), probs_np)
-
+    n_classes = probs_np.shape[1]
+    if n_classes == 2:
+        # Binary: scikit-learn wants the probability of the POSITIVE class only (usually column 1)
+        auroc = roc_auc_score(y_true, probs_np[:, 1])
+    else:
+        # Multiclass: scikit-learn wants the full matrix + multi_class param
+        auroc = auroc = roc_auc_score(y_true, probs_np, multi_class='ovr', average='weighted')
+    
     metrics = {
         "Accuracy": acc,
-        "Precision": precision_score(true_labels.detach().cpu().numpy(), preds[mask].detach().cpu().numpy()),
-        "Recall": recall_score(true_labels.detach().cpu().numpy(), preds[mask].detach().cpu().numpy()),
+        "Precision": precision_score(y_true, y_preds, average='weighted'),
+        "Recall": recall_score(y_true, y_preds, average='weighted'),
         "F1-Score": f1,
         "AUROC": auroc
         }
 
-    return metrics, loss, preds, fuzzy_rules
+    return metrics, loss, y_preds, fuzzy_rules
 
 
 # ---------------------------------------------------------
@@ -121,10 +128,11 @@ def train(model, data, optimizer, epochs, device):
 # ---------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='paper_gcn',
-                        choices=['gcn', 'gat', 'gin','paper_gcn'])
-    parser.add_argument('--dataset', type=str, default='RawExpression', choices=['Composite-k16', 'Composite-k30','NormExpression','RawExpression'])
-    parser.add_argument('--graph_file', type=str, default="../AD/data/composite_patient_k30.pkl")
+    parser.add_argument('--model', type=str, default='fuzzy_only',
+                        choices=['gcn', 'gat', 'gin','paper_gcn', 'fuzzy_only'])
+    parser.add_argument('--dataset', type=str, default='Composite', choices=['Composite', 'Composite','NormExpression','RawExpression'])
+    parser.add_argument('--k', type=int, default=5, help="k used in K-NN clustering to build graph")
+    parser.add_argument('--graph_file', type=str, default="../AD/data/composite_patient_k5.pkl")
     parser.add_argument('--output_dir', type=str, default='../results')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--hidden_channels', type=int, default=64)
@@ -201,7 +209,7 @@ def main():
     # Save results
     save_dir = os.path.join(
         args.output_dir,
-        f"fuzzy_{args.model}_{args.dataset}"
+        f"fuzzy_{args.model}_{args.dataset}-k{args.k}"
     )
     os.makedirs(save_dir, exist_ok=True)
 
@@ -210,7 +218,7 @@ def main():
 
     # Predictions
     torch.save({
-        "preds": test_preds.cpu(),
+        "preds": test_preds,
         "labels": data.y.cpu(),
     }, os.path.join(save_dir, "predictions.pt"))
 

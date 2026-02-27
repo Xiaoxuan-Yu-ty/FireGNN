@@ -215,6 +215,65 @@ class FuzzyGCN(nn.Module):
         out = self.classifier(x)
         return F.log_softmax(out, dim=1), fuzzy_rules if topo_features is not None else None
 
+class FuzzyOnlyGCN(nn.Module):
+    """
+    GCN with fuzzy rule enhancement but only use rules for classification.
+    """
+    
+    def __init__(self, in_channels, hidden_channels, out_channels, 
+                 num_rules=10, num_layers=2, dropout=0.5):
+        super(FuzzyOnlyGCN, self).__init__()
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.num_rules = num_rules
+        
+        # GCN layers
+        self.convs = nn.ModuleList()
+        self.convs.append(GCNConv(in_channels, hidden_channels))
+        
+        for _ in range(num_layers - 2):
+            self.convs.append(GCNConv(hidden_channels, hidden_channels))
+        
+        if num_layers > 1:
+            self.convs.append(GCNConv(hidden_channels, hidden_channels))
+        
+        # Batch normalization
+        self.bns = nn.ModuleList()
+        for _ in range(num_layers - 1):
+            self.bns.append(nn.BatchNorm1d(hidden_channels))
+        
+        # Fuzzy rule layer
+        self.fuzzy_layer = FuzzyRuleLayer(6, num_rules)  # 6 topological features
+        
+        # Rule integration layers: h(u)' = W [hu, ru] + b
+        self.rule_integration = nn.Linear(hidden_channels + num_rules, hidden_channels)
+        self.rule_proj = nn.Linear(num_rules, hidden_channels)
+        
+        # Final classification layer
+        self.classifier = nn.Linear(hidden_channels, out_channels)
+        
+    def forward(self, x, edge_index, edge_attr=None, topo_features=None):
+        # GCN forward pass
+        for i in range(self.num_layers - 1):
+            x = self.convs[i](x, edge_index, edge_attr)
+            x = self.bns[i](x)
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        
+        x = self.convs[-1](x, edge_index, edge_attr)
+        
+        # Generate fuzzy rules
+        if topo_features is not None:
+            fuzzy_rules = self.fuzzy_layer(topo_features)
+            
+            # Integrate fuzzy rules with GNN embeddings
+            combined = torch.cat([x, fuzzy_rules], dim=1) # project rule to embedding dimension
+            x = F.relu(self.rule_integration(combined)) # gating and fusion
+        
+        # Final classification
+        out = self.classifier(self.rule_proj(fuzzy_rules))
+        return F.log_softmax(out, dim=1), fuzzy_rules if topo_features is not None else None
+
 
 class FuzzyGAT(nn.Module):
     """
@@ -379,7 +438,7 @@ def get_fuzzy_model(model_type, in_channels, hidden_channels, out_channels, **kw
     Factory function to create fuzzy rule-enhanced models.
     
     Args:
-        model_type: Type of model ('gcn', 'gat', 'gin','paper_gcn)
+        model_type: Type of model ('gcn', 'gat', 'gin','paper_gcn','fuzzy_only')
         in_channels: Input feature dimension
         hidden_channels: Hidden layer dimension
         out_channels: Output dimension (number of classes)
@@ -394,6 +453,8 @@ def get_fuzzy_model(model_type, in_channels, hidden_channels, out_channels, **kw
         return FuzzyGCN(in_channels, hidden_channels, out_channels, **kwargs)
     elif model_type =='paper_gcn':
         return PaperFuzzyGCN(in_channels, hidden_channels, out_channels, **kwargs)
+    elif model_type == 'fuzzy_only':
+        return FuzzyOnlyGCN(in_channels, hidden_channels, out_channels, **kwargs)
     elif model_type == 'gat':
         return FuzzyGAT(in_channels, hidden_channels, out_channels, **kwargs)
     elif model_type == 'gin':

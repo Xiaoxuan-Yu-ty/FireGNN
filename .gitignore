@@ -55,3 +55,13 @@ results/fuzzy_gcn_RawExpression
 results/fuzzy_gin_RawExpression
 results/fuzzy_paper_gcn_Composite-k16
 results/fuzzy_paper_gcn_RawExpression
+results/fuzzy_gcn_Bloodmnist
+results/fuzzy_paper_gcn_Bloodmnist
+results/baseline_gcn_Bloodmnist
+results/fuzzy_fuzzy_only_Bloodmnist
+results/fuzzy_fuzzy_only_Composite-k16
+results/fuzzy_fuzzy_only_NormExpression
+results/fuzzy_fuzzy_only_NormExpression-k5
+results/fuzzy_gcn_NormExpression-k5
+results/fuzzy_fuzzy_only_Composite-k5
+results/fuzzy_gcn_Composite-k5

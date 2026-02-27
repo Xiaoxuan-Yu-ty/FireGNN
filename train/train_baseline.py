@@ -30,34 +30,34 @@ from models.baseline_models import get_baseline_model
 # Evaluation
 # ---------------------------------------------------------
 @torch.no_grad()
+@torch.no_grad()
 def evaluate(model, data, mask):
     model.eval()
-    out = model(
+    out= model(
         data.x,
         data.edge_index
     )
-    preds = out.argmax(dim=1)
-    true_labels = data.y[mask]
-    correct = (preds[mask] == true_labels).sum().item()
+    y_preds = out.argmax(dim=1)[mask].detach().cpu().numpy()
+    y_true = data.y[mask].detach().cpu().numpy()
+    correct = (y_preds == y_true).sum().item()
     acc = correct / mask.sum().item()
-    loss = F.nll_loss(out[mask], true_labels).item()
+    loss = F.nll_loss(out[mask], data.y[mask]).item()
 
     # other metrics
-    f1 = f1_score(true_labels.detach().cpu().numpy(), preds[mask].detach().cpu().numpy())
-    probs = torch.exp(out)[:, 1][mask]
+    f1 = f1_score(y_true, y_preds, average='weighted')
+    probs = torch.exp(out)[mask]
     probs_np = probs.detach().cpu().numpy()
-    auroc = roc_auc_score(true_labels.detach().cpu().numpy(), probs_np)
+    auroc = roc_auc_score(y_true, probs_np, multi_class='ovr', average='weighted')
 
     metrics = {
         "Accuracy": acc,
-        "Precision": precision_score(true_labels.detach().cpu().numpy(), preds[mask].detach().cpu().numpy()),
-        "Recall": recall_score(true_labels.detach().cpu().numpy(), preds[mask].detach().cpu().numpy()),
+        "Precision": precision_score(y_true, y_preds, average='weighted'),
+        "Recall": recall_score(y_true, y_preds, average='weighted'),
         "F1-Score": f1,
         "AUROC": auroc
         }
 
-    return metrics, loss, preds
-
+    return metrics, loss, y_preds
 
 # ---------------------------------------------------------
 # Training loop
@@ -115,10 +115,10 @@ def train(model, data, optimizer, epochs, device):
 # ---------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='gat',
+    parser.add_argument('--model', type=str, default='gcn',
                         choices=['gcn', 'gat', 'gin'])
-    parser.add_argument('--dataset', type=str, default='Composite-k16', choices=['Composite-k16', 'Composite-k30','NormExpression','RawExpression'])
-    parser.add_argument('--graph_file', type=str, default="../AD/data/composite_patient_k16.pkl")
+    parser.add_argument('--dataset', type=str, default='Bloodmnist', choices=['Composite-k16', 'Composite-k30','NormExpression','RawExpression'])
+    parser.add_argument('--graph_file', type=str, default="../datasets/G_Bloodmnist_inductive.gpickle")
     parser.add_argument('--output_dir', type=str, default='../results')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--hidden_channels', type=int, default=64)
@@ -187,7 +187,7 @@ def main():
 
     # Predictions
     torch.save({
-        "preds": test_preds.cpu(),
+        "preds": test_preds,
         "labels": data.y.cpu(),
     }, os.path.join(save_dir, "predictions.pt"))
 
