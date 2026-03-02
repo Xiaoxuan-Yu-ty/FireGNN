@@ -147,14 +147,14 @@ class GIN(nn.Module):
         for _ in range(num_layers - 1):
             self.bns.append(nn.BatchNorm1d(hidden_channels))
     
-    def forward(self, x, edge_index, edge_attr=None):
+    def forward(self, x, edge_index):
         for i in range(self.num_layers - 1):
-            x = self.convs[i](x, edge_index, edge_attr)
+            x = self.convs[i](x, edge_index)
             x = self.bns[i](x)
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         
-        x = self.convs[-1](x, edge_index, edge_attr)
+        x = self.convs[-1](x, edge_index)
         return F.log_softmax(x, dim=1)
 
 

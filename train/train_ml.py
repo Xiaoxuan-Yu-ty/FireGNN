@@ -28,7 +28,7 @@ def objective_lr(trial, X_train, y_train,random_state):
     }
     model = LogisticRegression(**params)
     # cv=5 means 5-fold cross-validation
-    return cross_val_score(model, X_train, y_train, cv=5, scoring='roc_auc', n_jobs=-1).mean()
+    return cross_val_score(model, X_train, y_train, cv=5, scoring='accuracy', n_jobs=-1).mean()
 
 def objective_rf(trial, X_train, y_train, random_state):
     params = {
@@ -40,7 +40,7 @@ def objective_rf(trial, X_train, y_train, random_state):
         "class_weight": trial.suggest_categorical("class_weight", ["balanced", "balanced_subsample", None])
     }
     model = RandomForestClassifier(**params, random_state=random_state)
-    return cross_val_score(model, X_train, y_train, cv=5, scoring='roc_auc', n_jobs=-1).mean()
+    return cross_val_score(model, X_train, y_train, cv=5, scoring='accuracy', n_jobs=-1).mean()
 
 def objective_svm(trial, X_train, y_train, random_state):
     params = {
@@ -52,7 +52,7 @@ def objective_svm(trial, X_train, y_train, random_state):
         "probability": True
     }
     model = SVC(**params, random_state=random_state)
-    return cross_val_score(model, X_train, y_train, cv=5, scoring='roc_auc', n_jobs=-1).mean()
+    return cross_val_score(model, X_train, y_train, cv=5, scoring='accuracy', n_jobs=-1).mean()
 
 def main():
 
@@ -84,7 +84,7 @@ def main():
 
     # 2. split train, val, test data
     y_train, y_test = train_test_split(labels, test_size=0.2,random_state=args.seed)
-    if args.dataset == 'Composite':
+    if 'Composite' in args.dataset:
         X_train, X_test = train_test_split(embed_features,test_size=0.2,random_state=args.seed)
     elif args.dataset == 'RawExpression':
         X_train, X_test = train_test_split(exp_raw_features,test_size=0.2,random_state=args.seed)

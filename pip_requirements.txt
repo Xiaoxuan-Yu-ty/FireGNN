@@ -1,48 +1,23 @@
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.2
 aiosignal==1.4.0
-alembic @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_alembic_1770806831/work
-asttokens @ file:///home/conda/feedstock_root/build_artifacts/asttokens_1763409923949/work
 attrs==25.4.0
 certifi==2025.11.12
 charset-normalizer==3.4.4
-colorlog @ file:///home/conda/feedstock_root/build_artifacts/colorlog_1760645008230/work
-comm @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_comm_1753453984/work
 contourpy==1.3.3
 cycler==0.12.1
-debugpy @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_debugpy_1765840814/work
-decorator @ file:///home/conda/feedstock_root/build_artifacts/decorator_1740384970518/work
-executing @ file:///home/conda/feedstock_root/build_artifacts/executing_1756729339227/work
 filelock==3.20.1
 fire==0.7.1
 fonttools==4.61.1
 frozenlist==1.8.0
-fsspec @ file:///home/conda/feedstock_root/build_artifacts/fsspec_1770387778895/work
-gmpy2 @ file:///home/conda/feedstock_root/build_artifacts/gmpy2_1762946744596/work
-greenlet @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_greenlet_1770077499/work
 idna==3.11
 ImageIO==2.37.2
-importlib_metadata @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_importlib-metadata_1747934053/work
-ipykernel @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_ipykernel_1761567932/work
-ipython @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_ipython_1764766793/work
-ipython_pygments_lexers @ file:///home/conda/feedstock_root/build_artifacts/ipython_pygments_lexers_1737123620466/work
-jedi @ file:///home/conda/feedstock_root/build_artifacts/jedi_1733300866624/work
-Jinja2 @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_jinja2_1764517220/work
 joblib==1.5.3
-jupyter_client @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_jupyter_client_1765375773/work
-jupyter_core @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_jupyter_core_1760643864/work
 kiwisolver==1.4.9
 lazy_loader==0.4
-lightning-utilities @ file:///home/conda/feedstock_root/build_artifacts/lightning-utilities_1754515506335/work
-Mako @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_mako_1764678340/work
-MarkupSafe @ file:///home/conda/feedstock_root/build_artifacts/markupsafe_1759055168201/work
 matplotlib==3.10.8
-matplotlib-inline @ file:///home/conda/feedstock_root/build_artifacts/matplotlib-inline_1761214490209/work
 medmnist==3.0.2
-mpmath @ file:///home/conda/feedstock_root/build_artifacts/mpmath_1733302684489/work
 multidict==6.7.0
-nest_asyncio @ file:///home/conda/feedstock_root/build_artifacts/nest-asyncio_1733325553580/work
-networkx @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_networkx_1765215107/work
 numpy==2.4.0
 nvidia-cublas-cu12==12.4.5.8
 nvidia-cuda-cupti-cu12==12.4.127
