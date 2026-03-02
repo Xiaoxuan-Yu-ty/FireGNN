@@ -65,3 +65,9 @@ results/fuzzy_fuzzy_only_NormExpression-k5
 results/fuzzy_gcn_NormExpression-k5
 results/fuzzy_fuzzy_only_Composite-k5
 results/fuzzy_gcn_Composite-k5
+results/ml_LogisticRegression_NormExpression
+results/ml_LogisticRegression_RawExpression
+results/ml_RandomForest_NormExpression
+results/ml_RandomForest_RawExpression
+results/ml_SVM_NormExpression
+results/ml_SVM_RawExpression
