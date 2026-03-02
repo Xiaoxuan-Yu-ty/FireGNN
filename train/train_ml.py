@@ -57,12 +57,12 @@ def objective_svm(trial, X_train, y_train, random_state):
 def main():
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='RawExpression', choices=['Composite-k16', 'Composite-k30','NormExpression','RawExpression'])
-    parser.add_argument('--expression_file', type=str, default="/Users/yuxiaoxuan/master_thesis/FireGNN/AD/data/adni_gene_cleaned.csv")
-    parser.add_argument('--embedding_file', type=str, default="/Users/yuxiaoxuan/master_thesis/FireGNN/AD/data/composite_embed.pt")
-    parser.add_argument('--design_path', type=str, default="/Users/yuxiaoxuan/master_thesis/FireGNN/AD/data/adni_targets.tsv")
-    parser.add_argument('--output_dir', type=str, default='./results')
-    parser.add_argument('--n_trials', type=int, default=20)
+    parser.add_argument('--dataset', type=str, default='RawExpression', choices=['RawExpression','Composite','NormExpression'])
+    parser.add_argument('--expression_file', type=str, default="../AD/data/adni_gene_cleaned.csv")
+    parser.add_argument('--embedding_file', type=str, default="../AD/data/composite_embed.pt")
+    parser.add_argument('--design_path', type=str, default="../AD/data/adni_targets.tsv")
+    parser.add_argument('--output_dir', type=str, default='../results')
+    parser.add_argument('--n_trials', type=int, default=50)
     parser.add_argument('--seed', type=int, default=42)
 
     args = parser.parse_args()
