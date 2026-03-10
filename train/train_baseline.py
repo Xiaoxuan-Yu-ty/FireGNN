@@ -117,8 +117,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='gcn',
                         choices=['gcn', 'gat', 'gin'])
-    parser.add_argument('--dataset', type=str, default='Bloodmnist', choices=['Composite-k16', 'Composite-k30','NormExpression','RawExpression'])
-    parser.add_argument('--graph_file', type=str, default="../datasets/G_Bloodmnist_inductive.gpickle")
+    parser.add_argument('--dataset', type=str, default='Bloodmnist', choices=['Composite', 'Bloodmnist','NormExpression','RawExpression','KGRule_composite'])
+    parser.add_argument('--k', type=int, default=8)
+    parser.add_argument('--graph_file', type=str, default='../datasets/G_Bloodmnist_k1.pkl')
     parser.add_argument('--output_dir', type=str, default='../results')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--hidden_channels', type=int, default=64)
@@ -133,6 +134,7 @@ def main():
     device = get_device()
 
     # load graph and data
+    #graph_file = f"../datasets/G_{args.dataset}_k{args.k}.pkl"
     G = load_graph(args.graph_file)
     data = prepare_pytorch_geometric_data(G)
     data = data.to(device)
@@ -181,24 +183,26 @@ def main():
         f"baseline_{args.model}_{args.dataset}"
     )
     os.makedirs(save_dir, exist_ok=True)
+    k_dir = os.path.join(save_dir,f"k{args.k}")
+    os.makedirs(k_dir, exist_ok=True)
 
     # Model
-    torch.save(best_state, os.path.join(save_dir, "model.pt"))
+    torch.save(best_state, os.path.join(k_dir, "model.pt"))
 
     # Predictions
     torch.save({
         "preds": test_preds,
         "labels": data.y.cpu(),
-    }, os.path.join(save_dir, "predictions.pt"))
+    }, os.path.join(k_dir, "predictions.pt"))
 
     # Metrics
-    with open(os.path.join(save_dir, "metrics.json"), "w") as f:
+    with open(os.path.join(k_dir, "metrics.json"), "w") as f:
         json.dump({
             "test_metrics": test_metrics,
             "history": history
         }, f, indent=4)
 
-    print(f"Saved results to: {save_dir}")
+    print(f"Saved results to: {k_dir}")
 
 
 if __name__ == "__main__":

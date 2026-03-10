@@ -4,6 +4,7 @@ Provides functions for graph construction, fuzzy rule computation,
 and auxiliary task generation.
 """
 
+import pandas as pd
 import torch
 import torch.nn as nn
 import numpy as np
@@ -318,7 +319,7 @@ def prepare_pytorch_geometric_data(G, topological_features=None, auxiliary_featu
     topo_features = np.vstack([topological_features[name] for name in feature_names]).T
     scaler = StandardScaler()
     topo_features = scaler.fit_transform(topo_features)
-    
+
     # Create PyTorch Geometric Data object
     data = Data(
         x=torch.tensor(x, dtype=torch.float),
@@ -338,6 +339,79 @@ def prepare_pytorch_geometric_data(G, topological_features=None, auxiliary_featu
         data.sim_scores = torch.tensor(auxiliary_features['sim_scores'], dtype=torch.float)
         data.homophily = torch.tensor(auxiliary_features['homophily'], dtype=torch.float)
         data.entropies = torch.tensor(auxiliary_features['entropies'], dtype=torch.float)
+    
+    return data
+
+def get_kg_features(feature_path):
+    df = pd.read_csv(feature_path)
+    kg_features = df.to_numpy()
+    scaler = StandardScaler()
+    kg_features = scaler.fit_transform(kg_features)
+    return kg_features
+
+def prepare_pyg_data(G, kg_feature_path, kg_features=True, topological_features=False):
+    """
+    Convert NetworkX graph to PyTorch Geometric Data object.
+    
+    Args:
+        G: Networkx graph object
+        topological_features: Optional pre-computed topological features
+        auxiliary_features: Optional pre-computed auxiliary features
+        
+    Returns:
+        Data: PyTorch Geometric Data object
+    """
+    # Extract basic data
+    x = np.array([G.nodes[n]['x'] for n in G.nodes()])
+    y = np.array([G.nodes[n]['y'] for n in G.nodes()])
+    
+    # Create edge_index and edge_attr
+    edge_list = []
+    edge_attr_list = []
+    for u, v, d in G.edges(data=True):
+        edge_list.append([u, v])
+        edge_list.append([v, u])
+        edge_attr_list.append(d['weight'])
+        edge_attr_list.append(d['weight'])
+    
+    edge_index = torch.tensor(edge_list,dtype=torch.long).t().contiguous()
+    edge_attr = torch.tensor(edge_attr_list, dtype=torch.float)
+    
+    # Create masks
+    train_mask = np.array([G.nodes[n].get('train', True) for n in G.nodes()])
+    val_mask = np.array([G.nodes[n].get('val', False) for n in G.nodes()])
+    test_mask = np.array([G.nodes[n].get('test', False) for n in G.nodes()])
+    
+    # Create PyTorch Geometric Data object
+    data = Data(
+        x=torch.tensor(x, dtype=torch.float),
+        edge_index=edge_index,
+        edge_attr=edge_attr,
+        y=torch.tensor(y, dtype=torch.long),
+        train_mask=torch.tensor(train_mask, dtype=torch.bool),
+        val_mask=torch.tensor(val_mask, dtype=torch.bool),
+        test_mask=torch.tensor(test_mask, dtype=torch.bool),
+    )
+    
+    # Add kg features if True
+    if kg_features:
+        kg_features = get_kg_features(kg_feature_path)
+        data.kg_features = torch.tensor(kg_features)
+    # Add topological features if True
+    if topological_features:
+        topological_features = compute_topological_features(G)
+    
+        # Stack and standardize topological features
+        feature_names = ['degrees', 'clustering', 'two_hop_agreement', 
+                        'eigenvector_centrality', 'degree_centrality', 'avg_edge_weight']
+        
+        topo_features = np.vstack([topological_features[name] for name in feature_names]).T
+        scaler = StandardScaler()
+        topo_features = scaler.fit_transform(topo_features)
+
+        data.topo_features=torch.tensor(topo_features, dtype=torch.float),
+        data.topo_scaler_mean=torch.tensor(scaler.mean_, dtype=torch.float),
+        data.topo_scaler_scale=torch.tensor(scaler.scale_, dtype=torch.float)
     
     return data
 

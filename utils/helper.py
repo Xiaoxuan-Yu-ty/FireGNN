@@ -34,7 +34,7 @@ def extract_hgnc(node_id):
 def add_patient_to_kg(kg:nx.MultiDiGraph, 
                       exp:pd.DataFrame, 
                       labels: list, 
-                      output_filename:str=None)->Tuple[nx.MultiDiGraph,set]:
+                      output_filename:str)->Tuple[nx.MultiGraph,set]:
     """Add patients to KG with gene-expression-value as edge_weight, 
     create edges between patients and all overlapping HGNC-proteins .
 
@@ -84,6 +84,7 @@ def add_patient_to_kg(kg:nx.MultiDiGraph,
         with open(output_filename, 'wb') as f:
             pickle.dump(G, f)
     print('-------------------------- Done ------------------------------')
+    
     return G, mapped_nodes
 
 # compute cosine similarity to ad_embed
@@ -404,3 +405,4 @@ def set_random_seeds(seed=42):
         torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False 
+
