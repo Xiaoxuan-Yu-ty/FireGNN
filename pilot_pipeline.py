@@ -34,7 +34,7 @@ def run_command(cmd, description):
 def main():
     parser = argparse.ArgumentParser(description='Run Pilot Study pipeline')
     parser.add_argument('--dataset', type=str, default="Bloodmnist",
-                       choices=['Composite', 'KGRules_Composite', 'KGRules_Expression','NormExpression','RawExpression','Bloodmnist'],
+                       choices=['Composite', 'BRComposite', 'BRNormExpression','NormExpression','RawExpression','Bloodmnist'],
                        help='Dataset to use')
     parser.add_argument('--k', type=int, default=20, help='Number of clusters in K-NN')
     parser.add_argument('--models', type=str, nargs='+', default=['gcn', 'gat', 'gin'],
@@ -66,7 +66,15 @@ def main():
     # run the pipline for each k-graph
     for i in range(2,args.k):
         # Build graph from scratch is graph file is not provided
-        graph_file = f"datasets/three_classes/no_label_leakage/G_{args.dataset}_k{i}.pkl"
+        if 'Composite' in args.dataset:
+            dataset = 'Composite'
+        elif 'NormExpression' in args.dataset:
+            dataset = 'NormExpression'
+        elif 'RawExpression' in args.dataset:
+            dataset = 'RawExpression'
+        else:
+            dataset = args.dataset
+        graph_file = f"datasets/three_classes/no_label_leakage/G_{dataset}_k{i}.pkl"
             
         print(f"Using graph file: {graph_file}")
 
@@ -80,7 +88,7 @@ def main():
         # Train fuzzy models
         if args.train_fuzzy:
             for model in ['gcn', 'gat', 'gin','paper_gcn', 'fuzzy_only']:
-                cmd = f"python train/train_fuzzy.py --model {model} --dataset {args.dataset} --graph_file {graph_file} --k {i} --output_dir {args.output_dir} --epochs {args.epochs}"
+                cmd = f"python train/train_fuzzy_kg.py --model {model} --dataset {args.dataset} --graph_file {graph_file} --k {i} --output_dir {args.output_dir} --epochs {args.epochs}"
                 if not run_command(cmd, f"Training {model.upper()} fuzzy"):
                     print(f"Failed to train {model} fuzzy. Continuing...")
         

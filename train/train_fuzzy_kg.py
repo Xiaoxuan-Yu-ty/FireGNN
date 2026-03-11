@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Training script for Baseline GNN models.
+Training script for fuzzy rule-enhanced FireGNN models.
 """
 
 import argparse
@@ -20,22 +20,28 @@ except NameError:
     base_dir = os.getcwd()
 sys.path.append(os.path.dirname(base_dir))
 from utils.graph_utils import (
+    create_fuzzy_rules,
     load_graph,
+    get_kg_features,
     prepare_pytorch_geometric_data,
+    prepare_pyg_data,
+    create_fuzzy_rules, 
     get_device,
     set_random_seeds
 )
+
+from fuzzy_models.fuzzy_models import get_fuzzy_model
 from models.baseline_models import get_baseline_model
 
 # Evaluation
 # ---------------------------------------------------------
 @torch.no_grad()
-@torch.no_grad()
 def evaluate(model, data, mask):
     model.eval()
-    out= model(
+    out, fuzzy_rules = model(
         data.x,
-        data.edge_index
+        data.edge_index,
+        topo_features=data.topo_features
     )
     y_preds = out.argmax(dim=1)[mask].detach().cpu().numpy()
     y_true = data.y[mask].detach().cpu().numpy()
@@ -64,7 +70,8 @@ def evaluate(model, data, mask):
         "AUROC": auroc
         }
 
-    return metrics, loss, y_preds
+    return metrics, loss, y_preds, fuzzy_rules
+
 
 # ---------------------------------------------------------
 # Training loop
@@ -88,9 +95,10 @@ def train(model, data, optimizer, epochs, device):
         model.train()
         optimizer.zero_grad()
 
-        out = model(
+        out, _ = model(
             data.x,
             data.edge_index,
+            topo_features=data.topo_features
         )
 
         loss = F.nll_loss(out[data.train_mask], data.y[data.train_mask])
@@ -98,8 +106,8 @@ def train(model, data, optimizer, epochs, device):
         optimizer.step()
 
         # ---- Evaluation ----
-        train_metrics, train_loss, _ = evaluate(model, data, data.train_mask)
-        val_metrics, val_loss, _ = evaluate(model, data, data.val_mask)
+        train_metrics, train_loss, _,_ = evaluate(model, data, data.train_mask)
+        val_metrics, val_loss, _,_ = evaluate(model, data, data.val_mask)
 
         history["train_acc"].append(train_metrics['Accuracy'])
         history["val_acc"].append(val_metrics['Accuracy'])
@@ -123,17 +131,16 @@ def train(model, data, optimizer, epochs, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='gcn',
-                        choices=['gcn', 'gat', 'gin'])
-    parser.add_argument('--dataset', type=str, 
-                        default='Bloodmnist', 
-                        choices=['Composite', 'BRComposite', 'BRNormExpression','NormExpression','RawExpression','Bloodmnist'],
-                       help='Dataset to use')
-    parser.add_argument('--k', type=int, default=8)
-    parser.add_argument('--graph_file', type=str, default='../datasets/G_Bloodmnist_k1.pkl')
+                        choices=['gcn', 'gat', 'gin','paper_gcn', 'fuzzy_only'])
+    parser.add_argument('--dataset', type=str, default='Composite', 
+                        choices=['Composite', 'BRComposite', 'BRNormExpression','NormExpression','RawExpression','Bloodmnist'])
+    parser.add_argument('--k', type=int, default=10, help="k used in K-NN clustering to build graph")
+    parser.add_argument('--graph_file', type=str, help="Filepath of input graph")
+    parser.add_argument('--kg_feature_path', type=str, default="./AD/data/kg_rule_features/feature_matrix.csv")
     parser.add_argument('--output_dir', type=str, default='../results')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--hidden_channels', type=int, default=64)
-    parser.add_argument('--num_rules', type=int, default=6)
+    parser.add_argument('--num_rules', type=int, default=22)
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--weight_decay', type=float, default=5e-4)
     parser.add_argument('--seed', type=int, default=42)
@@ -144,20 +151,32 @@ def main():
     device = get_device()
 
     # load graph and data
-    #graph_file = f"../datasets/G_{args.dataset}_k{args.k}.pkl"
-    G = load_graph(args.graph_file)
-    data = prepare_pytorch_geometric_data(G)
+    if not args.graph_file:
+        graph_file = f"../datasets/two_classes/no_label_leakage/G_{args.dataset}_k{args.k}.pkl"
+    else:
+        graph_file = args.graph_file
+    print(f"Using graph file: {graph_file}")
+    G = load_graph(graph_file)
+    kg_features = get_kg_features(args.kg_feature_path)
+    #print(kg_features)
+    data=prepare_pyg_data(G=G,
+                          kg_feature_path=args.kg_feature_path,
+                          kg_features=True,
+                          topological_features=False)
+    #data = prepare_pytorch_geometric_data(G)
     data = data.to(device)
+    #print(data)
 
     in_channels = data.x.size(1)
     out_channels = int(data.y.max().item() + 1)
 
     # prepare input for training
-    model = get_baseline_model(
+    model = get_fuzzy_model(
         model_type=args.model,
         in_channels=in_channels,
         hidden_channels=args.hidden_channels,
-        out_channels=out_channels
+        out_channels=out_channels,
+        num_rules=args.num_rules
     ).to(device)
 
     optimizer = torch.optim.Adam(
@@ -165,7 +184,23 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay
     )
-    
+    if args.model != "paper_gcn":
+        # Initialize Centers and Width (Gaussian way)
+        topo_features_np = data.topo_features.cpu().numpy()
+
+        centers, widths = create_fuzzy_rules(
+        topo_features_np,
+        num_rules=model.num_rules
+        )
+
+        with torch.no_grad():
+            model.fuzzy_layer.centers.copy_(
+                torch.tensor(centers, device=device, dtype=torch.float)
+            )
+            model.fuzzy_layer.log_sigmas.copy_(
+                torch.log(torch.tensor(widths, device=device, dtype=torch.float))
+            )
+        
     # train
     best_state, history = train(
         model=model,
@@ -179,7 +214,7 @@ def main():
     model.load_state_dict(best_state)
 
     # final evaluation on test dataset
-    test_metrics, test_loss, test_preds = evaluate(
+    test_metrics, test_loss, test_preds, fuzzy_rules = evaluate(
         model, data, data.test_mask
     )
 
@@ -188,31 +223,54 @@ def main():
         print(f"{k} : {v}")
 
     # Save results
-    save_dir = os.path.join(
+    ssdir = os.path.join(
         args.output_dir,
-        f"baseline_{args.model}_{args.dataset}"
+        f"fuzzy_{args.model}_{args.dataset}"
+    )
+    os.makedirs(ssdir, exist_ok=True)
+    save_dir = os.path.join(
+        ssdir,
+        f"k{args.k}"
     )
     os.makedirs(save_dir, exist_ok=True)
-    k_dir = os.path.join(save_dir,f"k{args.k}")
-    os.makedirs(k_dir, exist_ok=True)
 
     # Model
-    torch.save(best_state, os.path.join(k_dir, "model.pt"))
+    torch.save(best_state, os.path.join(save_dir, "model.pt"))
 
     # Predictions
     torch.save({
         "preds": test_preds,
         "labels": data.y.cpu(),
-    }, os.path.join(k_dir, "predictions.pt"))
+    }, os.path.join(save_dir, "predictions.pt"))
+
+    # Fuzzy rule activations
+    if fuzzy_rules is not None:
+        torch.save(
+            fuzzy_rules.cpu(),
+            os.path.join(save_dir, "fuzzy_rules.pt")
+        )
+    if args.model == 'paper_gcn':
+        fuzzy_params = {
+        "theta": getattr(model.fuzzy_layer, "theta", None),
+        "alpha": getattr(model.fuzzy_layer, "alpha", None)
+    }
+    else:
+        # Learned fuzzy parameters
+        fuzzy_params = {
+            "centers": getattr(model.fuzzy_layer, "centers", None),
+            "sigmas": getattr(model.fuzzy_layer, "log_sigmas", None),
+            "rule_weights": getattr(model.fuzzy_layer, "rule_weights", None)
+        }
+    torch.save(fuzzy_params, os.path.join(save_dir, "fuzzy_params.pt"))
 
     # Metrics
-    with open(os.path.join(k_dir, "metrics.json"), "w") as f:
+    with open(os.path.join(save_dir, "metrics.json"), "w") as f:
         json.dump({
             "test_metrics": test_metrics,
             "history": history
         }, f, indent=4)
 
-    print(f"Saved results to: {k_dir}")
+    print(f"Saved results to: {save_dir}")
 
 
 if __name__ == "__main__":

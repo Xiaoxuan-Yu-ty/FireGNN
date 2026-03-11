@@ -185,7 +185,7 @@ class FuzzyGCN(nn.Module):
             self.bns.append(nn.BatchNorm1d(hidden_channels))
         
         # Fuzzy rule layer
-        self.fuzzy_layer = FuzzyRuleLayer(6, num_rules)  # 6 topological features
+        self.fuzzy_layer = FuzzyRuleLayer(num_rules, num_rules)  # 6 topological features
         
         # Rule integration layers: h(u)' = W [hu, ru] + b
         self.rule_integration = nn.Linear(hidden_channels + num_rules, hidden_channels)
@@ -243,7 +243,7 @@ class FuzzyOnlyGCN(nn.Module):
             self.bns.append(nn.BatchNorm1d(hidden_channels))
         
         # Fuzzy rule layer
-        self.fuzzy_layer = FuzzyRuleLayer(6, num_rules)  # 6 topological features
+        self.fuzzy_layer = FuzzyRuleLayer(num_rules, num_rules)  # 6 topological features
         
         # Rule integration layers: h(u)' = W [hu, ru] + b
         self.rule_integration = nn.Linear(hidden_channels + num_rules, hidden_channels)
@@ -309,7 +309,7 @@ class FuzzyGAT(nn.Module):
             self.bns.append(nn.BatchNorm1d(hidden_channels * heads))
         
         # Fuzzy rule layer
-        self.fuzzy_layer = FuzzyRuleLayer(6, num_rules)  # 6 topological features
+        self.fuzzy_layer = FuzzyRuleLayer(num_rules, num_rules)  # 6 topological features
         
         # Rule integration layers
         self.rule_integration = nn.Linear(hidden_channels + num_rules, hidden_channels)
@@ -402,7 +402,7 @@ class FuzzyGIN(nn.Module):
             self.bns.append(nn.BatchNorm1d(hidden_channels))
         
         # Fuzzy rule layer
-        self.fuzzy_layer = FuzzyRuleLayer(6, num_rules)  # 6 topological features
+        self.fuzzy_layer = FuzzyRuleLayer(num_rules, num_rules)  # 6 topological features
         
         # Rule integration layers
         self.rule_integration = nn.Linear(hidden_channels + num_rules, hidden_channels)

@@ -343,8 +343,7 @@ def prepare_pytorch_geometric_data(G, topological_features=None, auxiliary_featu
     return data
 
 def get_kg_features(feature_path):
-    df = pd.read_csv(feature_path)
-    kg_features = df.to_numpy()
+    kg_features = np.loadtxt(feature_path, delimiter=',')
     scaler = StandardScaler()
     kg_features = scaler.fit_transform(kg_features)
     return kg_features
@@ -394,11 +393,11 @@ def prepare_pyg_data(G, kg_feature_path, kg_features=True, topological_features=
     )
     
     # Add kg features if True
-    if kg_features:
+    if kg_features and not topological_features:
         kg_features = get_kg_features(kg_feature_path)
-        data.kg_features = torch.tensor(kg_features)
+        data.topo_features = torch.tensor(kg_features, dtype=torch.float)
     # Add topological features if True
-    if topological_features:
+    elif topological_features and not kg_features:
         topological_features = compute_topological_features(G)
     
         # Stack and standardize topological features
@@ -413,6 +412,21 @@ def prepare_pyg_data(G, kg_feature_path, kg_features=True, topological_features=
         data.topo_scaler_mean=torch.tensor(scaler.mean_, dtype=torch.float),
         data.topo_scaler_scale=torch.tensor(scaler.scale_, dtype=torch.float)
     
+    elif kg_features and topological_features:
+        kg_features = get_kg_features(kg_feature_path)
+
+        topological_features = compute_topological_features(G)
+    
+        # Stack and standardize topological features
+        feature_names = ['degrees', 'clustering', 'two_hop_agreement', 
+                        'eigenvector_centrality', 'degree_centrality', 'avg_edge_weight']
+        
+        topo_features = np.vstack([topological_features[name] for name in feature_names]).T
+        scaler = StandardScaler()
+        topo_features = scaler.fit_transform(topo_features)
+
+        data.topo_features = torch.tensor(np.hstack((topo_features, kg_features)),dtype=torch.float)
+
     return data
 
 
