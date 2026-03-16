@@ -62,16 +62,23 @@ def add_mask_to_graph(graph, features, output):
 
     return graph
 
-def get_features(expression_path, design_path,composite_embed_path=None, num_classes=2, normalization=True):
+def get_features(expression_path, 
+                 design_path,
+                 composite_embed_path=None, 
+                 num_classes=2, 
+                 normalization=True):
     
     # get labels: 3 classes
     design = pd.read_csv(design_path, sep='\t', index_col=0)
+    labels = []
     if num_classes == 2:
         design['Old_Target'] = design['Old_Target'].map({'Control': 0, 'Disease': 1})
         labels = design['Old_Target'].to_numpy()
     elif num_classes == 3:
         design['Target'] = design['Target'].map({'Control': 0, 'AD': 1, 'MCI':2})
         labels = design['Target'].to_numpy()
+    else:
+        print("Invalid num_classes, please give 2 or 3 to num_classes.")
 
     # composite features
     if composite_embed_path:
@@ -89,6 +96,7 @@ def get_features(expression_path, design_path,composite_embed_path=None, num_cla
     else:
         # raw expression features
         features = data.to_numpy()
+    
     return features, labels
 
 def build_and_save_patient_graph(features,
@@ -103,21 +111,21 @@ def build_and_save_patient_graph(features,
     graph_info = {}
     for i in range(2,k):
         graph_info[i]={}
-        graph_composite = build_knn_graph_from_features(features=features,
+        graph = build_knn_graph_from_features(features=features,
                                                         labels=labels,
                                                         k=i,
                                                         add_label_edges=add_label_edges,
                                                         rewire_edges=rewire_edges,
                                                         )
-        print("The Number of Connected Components:", nx.number_connected_components(graph_composite))
-        graph_info[i] = [nx.number_connected_components(graph_composite),
-                                        nx.number_of_nodes(graph_composite),
-                                        nx.number_of_edges(graph_composite)]
+        print("The Number of Connected Components:", nx.number_connected_components(graph))
+        graph_info[i] = [nx.number_connected_components(graph),
+                                        nx.number_of_nodes(graph),
+                                        nx.number_of_edges(graph)]
         # add masks and save graph
         os.makedirs(output_dir, exist_ok=True)
-        graph_composite = add_mask_to_graph(graph_composite, features,
+        graph = add_mask_to_graph(graph, features,os.path.join(output_dir, f"G_{dataset}_k{i}.pkl"))
     # save info
-    with open(os.path.join(output_dir, 'gragh_patient_metrics.json'),'w') as f:
+    with open(os.path.join(output_dir, f'gragh_{dataset}_metrics.json'),'w') as f:
         json.dump(graph_info, f, indent=4)
     return graph_info
 
@@ -164,7 +172,7 @@ def rebuild_morpho_graphs(graph_path:str, dataset:str, k:int, output_dir:str,
         # save graph
         save_graph(graph, os.path.join(output_dir, f"G_{dataset}_k{i}.pkl"))
     
-    filename = os.path.join(output_dir, 'graph_metrics.json')
+    filename = os.path.join(output_dir, f'graph_{dataset}_metrics.json')
     with open(filename, 'w') as f:
         json.dump(graph_info, f, indent=4)
     return
@@ -172,7 +180,9 @@ def rebuild_morpho_graphs(graph_path:str, dataset:str, k:int, output_dir:str,
 def main(): 
     parser = argparse.ArgumentParser()
     parser.add_argument("--graph_type", type=str, default=['patient', 'morpho'], help='Which type of graph to build.')
-    parser.add_argument("--dataset", type=str, default='Bloodmnist', choices=['Bloodmnist','Organcmnist'], help='Dataset to rebuild graph with different k')
+    parser.add_argument("--dataset", type=str, default='Bloodmnist', 
+                        choices=['CompositeAD','CompositeADHealth', 'NormExpression', 'NormExpressionSubgraph', 'NormExpressionCluster', 'NormSubgraph', 'NormCluster','Bloodmnist','Organcmnist'], 
+                        help='Dataset to build graph with different k')
     parser.add_argument("--morpho_path", type=str, default="../datasets/G_Bloodmnist_inductive.gpickle")
     parser.add_argument("--exp_path", type=str, default="../AD/data/adni_gene_cleaned.csv")
     parser.add_argument("--labels_path", type=str, default="../AD/data/design_with_real_target.tsv")
@@ -200,14 +210,20 @@ def main():
     
     for graph_type in args.graph_type:
         if graph_type == 'patient':
-            build_and_save_patient_graph(composite_embed_path=args.kge_path,
-                                    expression_path=args.exp_path,
-                                    design_path=args.labels_path,
-                                    k=args.k,
-                                    output_dir=save_dir,
-                                    add_label_edges=args.label_leakage,
-                                    rewire_edges=args.label_leakage,
-                                    num_classes=args.num_classes)
+            features, labels = get_features(expression_path=args.exp_path,
+                                            design_path=args.labels_path,
+                                            composite_embed_path=args.kge_path,
+                                            num_classes=args.num_classes,
+                                            normalization=True
+                                            )
+            build_and_save_patient_graph(features=features,
+                                         labels=labels,
+                                         dataset=args.dataset,
+                                         k=args.k,
+                                         output_dir=save_dir,
+                                         add_label_edges=args.label_leakage,
+                                         rewire_edges=args.label_leakage,
+                                    )
         elif graph_type == 'morpho':
             rebuild_morpho_graphs(graph_path=args.morpho_path,
                                     k=args.k, 
