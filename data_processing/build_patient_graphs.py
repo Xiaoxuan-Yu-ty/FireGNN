@@ -62,10 +62,7 @@ def add_mask_to_graph(graph, features, output):
 
     return graph
 
-def build_and_save_patient_graph(composite_embed_path, expression_path, design_path, k:int, output_dir:str,
-                                add_label_edges=True,
-                                rewire_edges=True,
-                                num_classes=2):
+def get_features(expression_path, design_path,composite_embed_path=None, num_classes=2, normalization=True):
     
     # get labels: 3 classes
     design = pd.read_csv(design_path, sep='\t', index_col=0)
@@ -77,60 +74,48 @@ def build_and_save_patient_graph(composite_embed_path, expression_path, design_p
         labels = design['Target'].to_numpy()
 
     # composite features
-    embed_data = torch.load(composite_embed_path)
-    composite_features = torch.stack([embed_data[idx] for idx in embed_data.keys()]).cpu().tolist()
+    if composite_embed_path:
+        data = torch.load(composite_embed_path)
+        features = torch.stack([data[idx] for idx in data.keys()]).cpu().tolist()
     
     # expression features
-    exp_data = pd.read_csv(expression_path, index_col=0)
-    exp_data = exp_data.T
-    # raw expression features
-    exp_raw_features = exp_data.to_numpy()
-    # normalized expression features
-    exp_norm = (exp_data - exp_data.min())/(exp_data.max()-exp_data.min())
-    exp_norm_features = exp_norm.to_numpy()
+    data = pd.read_csv(expression_path, index_col=0)
+    data = data.T
+    
+    if normalization:
+        # normalized expression features
+        exp_norm = (data - data.min())/(data.max()-data.min())
+        features = exp_norm.to_numpy()
+    else:
+        # raw expression features
+        features = data.to_numpy()
+    return features, labels
 
-    # build graph for 3 types of data
+def build_and_save_patient_graph(features,
+                                labels,
+                                dataset:str,
+                                k:int, 
+                                output_dir:str,
+                                add_label_edges=True,
+                                rewire_edges=True,
+                                ):
+    # build graph with different ks
     graph_info = {}
     for i in range(2,k):
-        graph_info[i]=defaultdict(dict)
-        graph_composite = build_knn_graph_from_features(features=composite_features,
+        graph_info[i]={}
+        graph_composite = build_knn_graph_from_features(features=features,
                                                         labels=labels,
                                                         k=i,
                                                         add_label_edges=add_label_edges,
                                                         rewire_edges=rewire_edges,
                                                         )
         print("The Number of Connected Components:", nx.number_connected_components(graph_composite))
-        graph_info[i]['Composite'] = [nx.number_connected_components(graph_composite),
+        graph_info[i] = [nx.number_connected_components(graph_composite),
                                         nx.number_of_nodes(graph_composite),
                                         nx.number_of_edges(graph_composite)]
-        
-        graph_normexp = build_knn_graph_from_features(features=exp_norm_features,
-                                                        labels=labels,
-                                                        k=i,
-                                                        add_label_edges=add_label_edges,
-                                                        rewire_edges=rewire_edges,
-                                                        )
-        print("The Number of Connected Components:", nx.number_connected_components(graph_normexp))
-        graph_info[i]['NormExpression'] = [nx.number_connected_components(graph_normexp),
-                                            nx.number_of_nodes(graph_normexp),
-                                            nx.number_of_edges(graph_normexp)]
-        
-        graph_rawexp = build_knn_graph_from_features(features=exp_raw_features,
-                                                        labels=labels,
-                                                        k=i,
-                                                        add_label_edges=add_label_edges,
-                                                        rewire_edges=rewire_edges,
-                                                        )
-        print("The Number of Connected Components:", nx.number_connected_components(graph_rawexp))
-        graph_info[i]['RawExpression'] = [nx.number_connected_components(graph_rawexp),
-                                            nx.number_of_nodes(graph_rawexp),
-                                            nx.number_of_edges(graph_rawexp)]
-        
         # add masks and save graph
         os.makedirs(output_dir, exist_ok=True)
-        graph_composite = add_mask_to_graph(graph_composite, composite_features,os.path.join(output_dir, f"G_Composite_k{i}.pkl"))
-        graph_normexp = add_mask_to_graph(graph_normexp, exp_norm_features,os.path.join(output_dir, f"G_NormExpression_k{i}.pkl"))
-        graph_rawexp = add_mask_to_graph(graph_rawexp, exp_raw_features,os.path.join(output_dir, f"G_RawExpression_k{i}.pkl"))
+        graph_composite = add_mask_to_graph(graph_composite, features,
     # save info
     with open(os.path.join(output_dir, 'gragh_patient_metrics.json'),'w') as f:
         json.dump(graph_info, f, indent=4)
