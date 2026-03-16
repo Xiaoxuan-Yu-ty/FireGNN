@@ -289,7 +289,7 @@ def prepare_pytorch_geometric_data(G, topological_features=None, auxiliary_featu
     """
     # Extract basic data
     x = np.array([G.nodes[n]['x'] for n in G.nodes()])
-    y = np.array([G.nodes[n]['y'] for n in G.nodes()])
+    y = np.array([float(G.nodes[n]['y']) for n in G.nodes()])
     
     # Create edge_index and edge_attr
     edge_list = []

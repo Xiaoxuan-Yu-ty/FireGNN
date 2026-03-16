@@ -33,8 +33,8 @@ def run_command(cmd, description):
 
 def main():
     parser = argparse.ArgumentParser(description='Run Pilot Study pipeline')
-    parser.add_argument('--dataset', type=str, default="Bloodmnist",
-                       choices=['Composite', 'BRComposite', 'BRNormExpression','NormExpression','RawExpression','Bloodmnist'],
+    parser.add_argument('--dataset', type=str, nargs='+',
+                        default=['Composite', 'BRComposite', 'BRNormExpression','NormExpression','RawExpression','Bloodmnist'],
                        help='Dataset to use')
     parser.add_argument('--k', type=int, default=20, help='Number of clusters in K-NN')
     parser.add_argument('--models', type=str, nargs='+', default=['gcn', 'gat', 'gin'],
@@ -55,53 +55,61 @@ def main():
                        help='Output directory')
     parser.add_argument('--epochs', type=int, default=200,
                        help='Number of training epochs')
-    parser.add_argument('--n_trials', type=int, default=20,
+    parser.add_argument('--n_trials', type=int, default=50,
                        help='Number of trials for HPO')
     
     args = parser.parse_args()
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
-    
-    # run the pipline for each k-graph
-    for i in range(2,args.k):
-        # Build graph from scratch is graph file is not provided
-        if 'Composite' in args.dataset:
-            dataset = 'Composite'
-        elif 'NormExpression' in args.dataset:
-            dataset = 'NormExpression'
-        elif 'RawExpression' in args.dataset:
-            dataset = 'RawExpression'
-        else:
-            dataset = args.dataset
-        graph_file = f"datasets/three_classes/no_label_leakage/G_{dataset}_k{i}.pkl"
-            
-        print(f"Using graph file: {graph_file}")
+    # run pipeline for each dataset
+    for ds in args.dataset:
+        # run the pipline for each k-graph
+        for i in range(2,args.k):
+            # Build graph from scratch is graph file is not provided
+            if 'Composite' in ds:
+                dataset = 'Composite'
+            elif 'NormExpression' in ds:
+                dataset = 'NormExpression'
+            elif 'RawExpression' in ds:
+                dataset = 'RawExpression'
+            else:
+                dataset = ds
+            graph_file = f"datasets/three_classes/no_label_leakage/G_{dataset}_k{i}.pkl"
+                
+            print(f"Using graph file: {graph_file}")
 
-        # Train baseline models
-        if args.train_baselines:
-            for model in args.models:
-                cmd = f"python train/train_baseline.py --model {model} --dataset {args.dataset} --graph_file {graph_file} --k {i} --output_dir {args.output_dir} --epochs {args.epochs}"
-                if not run_command(cmd, f"Training {model.upper()} baseline"):
-                    print(f"Failed to train {model} baseline. Continuing...")
-        
-        # Train fuzzy models
-        if args.train_fuzzy:
-            for model in ['gcn', 'gat', 'gin','paper_gcn', 'fuzzy_only']:
-                cmd = f"python train/train_fuzzy_kg.py --model {model} --dataset {args.dataset} --graph_file {graph_file} --k {i} --output_dir {args.output_dir} --epochs {args.epochs}"
-                if not run_command(cmd, f"Training {model.upper()} fuzzy"):
-                    print(f"Failed to train {model} fuzzy. Continuing...")
-        
+            # Train baseline models
+            if args.train_baselines:
+                for model in args.models:
+                    cmd = f"python train/train_baseline.py --model {model} --dataset {ds} --graph_file {graph_file} --k {i} --output_dir {args.output_dir} --epochs {args.epochs}"
+                    if not run_command(cmd, f"Training {model.upper()} baseline"):
+                        print(f"Failed to train {model} baseline. Continuing...")
+            
+            # Train fuzzy models
+            if 'BR' in ds:
+                if args.train_fuzzy:
+                    for model in ['gcn', 'gat', 'gin','paper_gcn', 'fuzzy_only']:
+                        cmd = f"python train/train_biofuzzy.py --model {model} --dataset {ds} --graph_file {graph_file} --k {i} --output_dir {args.output_dir} --epochs {args.epochs}"
+                        if not run_command(cmd, f"Training {model.upper()} Biofuzzy"):
+                            print(f"Failed to train {model} fuzzy. Continuing...")
+            else:
+                if args.train_fuzzy:
+                    for model in ['gcn', 'gat', 'gin','paper_gcn', 'fuzzy_only']:
+                        cmd = f"python train/train_fuzzy.py --model {model} --dataset {ds} --graph_file {graph_file} --k {i} --output_dir {args.output_dir} --epochs {args.epochs}"
+                        if not run_command(cmd, f"Training {model.upper()} fuzzy"):
+                            print(f"Failed to train {model} fuzzy. Continuing...")
+            
         # Train ML models
         if args.train_ml:
-            cmd = f"python train/train_ml.py --dataset {args.dataset}  --output_dir {args.output_dir} --n_trials {args.n_trials}"
+            cmd = f"python train/train_ml.py --dataset {ds}  --output_dir {args.output_dir} --n_trials {args.n_trials}"
             if not run_command(cmd, f"Training ML models"):
                 print(f"Failed to train ML model. Continuing...")
-    
-    print(f"\n{'='*60}")
-    print("Pipeline completed!")
-    print(f"Results saved in: {args.output_dir}")
-    print(f"{'='*60}")
+        
+        print(f"\n{'='*60}")
+        print("Pipeline completed!")
+        print(f"Results saved in: {args.output_dir}")
+        print(f"{'='*60}")
 
 if __name__ == '__main__':
     main() 
