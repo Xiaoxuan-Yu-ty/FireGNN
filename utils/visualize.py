@@ -50,7 +50,7 @@ def plot_k_comparison(df, metric_name='Accuracy'):
     datasets = df['dataset'].unique()
     for ds in datasets:
         dff = df[df['dataset'] == ds]
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(20, 6))
         sns.barplot(data=dff, x='k', y=metric_name, hue='model')
         plt.title(f'{metric_name} Comparison across different k values on {ds} dataset')
         plt.ylabel(metric_name.capitalize())
