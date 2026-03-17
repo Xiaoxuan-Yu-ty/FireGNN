@@ -343,7 +343,7 @@ def prepare_pytorch_geometric_data(G, topological_features=None, auxiliary_featu
     return data
 
 def get_kg_features(feature_path):
-    kg_features = np.loadtxt(feature_path, delimiter=',')
+    kg_features = pd.read_csv(feature_path, index_col=0)
     scaler = StandardScaler()
     kg_features = scaler.fit_transform(kg_features)
     return kg_features

@@ -130,7 +130,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='fuzzy_only',
                         choices=['gcn', 'gat', 'gin','paper_gcn', 'fuzzy_only'])
-    parser.add_argument('--dataset', type=str, default='NormExpression', choices=['Composite', 'BRComposite', 'BRNormExpression','NormExpression','RawExpression','Bloodmnist'])
+    parser.add_argument('--dataset', type=str, default='NormExpression', 
+                        choices=['Composite','CompositeAD','CompositeADHealth', 'NormExpression', 'NormExpressionSubgraph', 'NormExpressionCluster', 'NormSubgraph', 'NormCluster','Bloodmnist','Organcmnist'])
     parser.add_argument('--k', type=int, default=5, help="k used in K-NN clustering to build graph")
     parser.add_argument('--graph_file', type=str, default="../AD/data/normalized_expression_k5.pkl")
     parser.add_argument('--output_dir', type=str, default='../results')

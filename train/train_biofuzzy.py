@@ -23,7 +23,6 @@ from utils.graph_utils import (
     create_fuzzy_rules,
     load_graph,
     get_kg_features,
-    prepare_pytorch_geometric_data,
     prepare_pyg_data,
     create_fuzzy_rules, 
     get_device,
@@ -31,7 +30,6 @@ from utils.graph_utils import (
 )
 
 from fuzzy_models.fuzzy_models import get_fuzzy_model
-from models.baseline_models import get_baseline_model
 
 # Evaluation
 # ---------------------------------------------------------
@@ -132,15 +130,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='gcn',
                         choices=['gcn', 'gat', 'gin','paper_gcn', 'fuzzy_only'])
-    parser.add_argument('--dataset', type=str, default='Composite', 
-                        choices=['Composite', 'BRComposite', 'BRNormExpression','NormExpression','RawExpression','Bloodmnist'])
+    parser.add_argument('--dataset', type=str, default='BRNormExpression', 
+                        choices=['BRComposite','BRCompositeAD','CompositeADHealth', 'BRNormExpression', 'BRNormExpressionSubgraph', 'BRNormExpressionCluster', 'BRNormSubgraph', 'BRNormCluster'])
     parser.add_argument('--k', type=int, default=10, help="k used in K-NN clustering to build graph")
-    parser.add_argument('--graph_file', type=str, help="Filepath of input graph")
-    parser.add_argument('--kg_feature_path', type=str, default="./AD/data/kg_rule_features/feature_matrix.csv")
+    parser.add_argument('--graph_file', type=str, 
+                        default="../datasets/two_classes/no_label_leakage/G_NormExpressionSubgraph_k10.pkl",
+                        help="Filepath of input graph")
+    parser.add_argument('--kg_feature_path', type=str, 
+                        default="../datasets/bioFeatures/subgraph_features.csv")
     parser.add_argument('--output_dir', type=str, default='../results')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--hidden_channels', type=int, default=64)
-    parser.add_argument('--num_rules', type=int, default=22)
     parser.add_argument('--lr', type=float, default=0.005)
     parser.add_argument('--weight_decay', type=float, default=5e-4)
     parser.add_argument('--seed', type=int, default=42)
@@ -158,7 +158,7 @@ def main():
     print(f"Using graph file: {graph_file}")
     G = load_graph(graph_file)
     kg_features = get_kg_features(args.kg_feature_path)
-    #print(kg_features)
+    print(kg_features.shape)
     data=prepare_pyg_data(G=G,
                           kg_feature_path=args.kg_feature_path,
                           kg_features=True,
@@ -169,14 +169,14 @@ def main():
 
     in_channels = data.x.size(1)
     out_channels = int(data.y.max().item() + 1)
-
+    num_rules = kg_features.shape[1]
     # prepare input for training
     model = get_fuzzy_model(
         model_type=args.model,
         in_channels=in_channels,
         hidden_channels=args.hidden_channels,
         out_channels=out_channels,
-        num_rules=args.num_rules
+        num_rules=num_rules
     ).to(device)
 
     optimizer = torch.optim.Adam(
@@ -225,7 +225,7 @@ def main():
     # Save results
     ssdir = os.path.join(
         args.output_dir,
-        f"fuzzy_{args.model}_{args.dataset}"
+        f"biofuzzy_{args.model}_{args.dataset}"
     )
     os.makedirs(ssdir, exist_ok=True)
     save_dir = os.path.join(

@@ -87,7 +87,8 @@ def get_features(expression_path,
     
     # expression features
     data = pd.read_csv(expression_path, index_col=0)
-    data = data.T
+    if data.shape[0] != 744:
+        data = data.T
     
     if normalization:
         # normalized expression features
@@ -179,14 +180,13 @@ def rebuild_morpho_graphs(graph_path:str, dataset:str, k:int, output_dir:str,
 
 def main(): 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--graph_type", type=str, default=['patient', 'morpho'], help='Which type of graph to build.')
-    parser.add_argument("--dataset", type=str, default='Bloodmnist', 
+    parser.add_argument("--dataset", type=str, default='NormExpressionSubgraph', 
                         choices=['CompositeAD','CompositeADHealth', 'NormExpression', 'NormExpressionSubgraph', 'NormExpressionCluster', 'NormSubgraph', 'NormCluster','Bloodmnist','Organcmnist'], 
                         help='Dataset to build graph with different k')
     parser.add_argument("--morpho_path", type=str, default="../datasets/G_Bloodmnist_inductive.gpickle")
-    parser.add_argument("--exp_path", type=str, default="../AD/data/adni_gene_cleaned.csv")
+    parser.add_argument("--exp_path", type=str, default="../datasets/bioFeatures/exp_subgraphs.csv")
     parser.add_argument("--labels_path", type=str, default="../AD/data/design_with_real_target.tsv")
-    parser.add_argument("--num_classes", type=int, default=3, choices=[2,3])
+    parser.add_argument("--num_classes", type=int, default=2, choices=[2,3])
     parser.add_argument("--kge_path", type=str, default="../AD/data/composite_embed.pt")
     parser.add_argument("--k", type=int, default=30, help="Number of k graphs to build with k in K-NN clustering")
     parser.add_argument("--output_dir", type=str, default="../datasets")
@@ -208,32 +208,28 @@ def main():
     os.makedirs(save_dir, exist_ok=True)
     print(f'Output_dir is {save_dir}')
     
-    for graph_type in args.graph_type:
-        if graph_type == 'patient':
-            features, labels = get_features(expression_path=args.exp_path,
-                                            design_path=args.labels_path,
-                                            composite_embed_path=args.kge_path,
-                                            num_classes=args.num_classes,
-                                            normalization=True
-                                            )
-            build_and_save_patient_graph(features=features,
-                                         labels=labels,
-                                         dataset=args.dataset,
-                                         k=args.k,
-                                         output_dir=save_dir,
-                                         add_label_edges=args.label_leakage,
-                                         rewire_edges=args.label_leakage,
-                                    )
-        elif graph_type == 'morpho':
-            rebuild_morpho_graphs(graph_path=args.morpho_path,
-                                    k=args.k, 
-                                    dataset=args.dataset,
-                                    output_dir=save_dir,
-                                    add_label_edges=args.label_leakage,
-                                    rewire_edges=args.label_leakage)
-        else:
-            print("Invalid graph_type, please choose in ['patient', 'morpho']")
-    
+    if args.dataset == 'Bloodmnist' or args.dataset == 'Organcmnist':
+        rebuild_morpho_graphs(graph_path=args.morpho_path,
+                                k=args.k, 
+                                dataset=args.dataset,
+                                output_dir=save_dir,
+                                add_label_edges=args.label_leakage,
+                                rewire_edges=args.label_leakage)
+    else:
+        features, labels = get_features(expression_path=args.exp_path,
+                                        design_path=args.labels_path,
+                                        composite_embed_path=args.kge_path,
+                                        num_classes=args.num_classes,
+                                        normalization=True
+                                        )
+        build_and_save_patient_graph(features=features,
+                                        labels=labels,
+                                        dataset=args.dataset,
+                                        k=args.k,
+                                        output_dir=save_dir,
+                                        add_label_edges=args.label_leakage,
+                                        rewire_edges=args.label_leakage,
+                                )
     
 if __name__=="__main__":
     main()

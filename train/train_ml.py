@@ -68,10 +68,10 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='BRNormExpression', 
-                        choices=['Composite', 'BRComposite', 'BRNormExpression','NormExpression','RawExpression'])
-    parser.add_argument('--expression_file', type=str, default="../AD/data/adni_gene_cleaned.csv")
-    parser.add_argument('--embedding_file', type=str, default="../AD/data/composite_embed.pt")
-    parser.add_argument('--design_path', type=str, default="../AD/data/adni_targets.tsv")
+                        choices=['Composite','CompositeAD','CompositeADHealth', 'NormExpression', 'NormExpressionSubgraph', 'NormExpressionCluster', 'NormSubgraph', 'NormCluster','Bloodmnist','Organcmnist'])
+    parser.add_argument('--expression_file', type=str, default="./AD/data/adni_gene_cleaned.csv")
+    parser.add_argument('--embedding_file', type=str, default="./AD/data/composite_embed.pt")
+    parser.add_argument('--design_path', type=str, default="./AD/data/adni_targets.tsv")
     parser.add_argument('--kg_feature_path', type=str, default="./AD/data/kg_rule_features/feature_matrix.csv")
    
     parser.add_argument('--output_dir', type=str, default='../results/ml')
