@@ -131,13 +131,13 @@ def main():
     parser.add_argument('--model', type=str, default='gcn',
                         choices=['gcn', 'gat', 'gin','paper_gcn', 'fuzzy_only'])
     parser.add_argument('--dataset', type=str, default='BRNormExpression', 
-                        choices=['BRComposite','BRCompositeAD','CompositeADHealth', 'BRNormExpression', 'BRNormExpressionSubgraph', 'BRNormExpressionCluster', 'BRNormSubgraph', 'BRNormCluster'])
+                        choices=['Composite','CompositeAD','CompositeADHealth', 'NormExpression', 'NormExpressionSubgraph', 'NormExpressionCluster', 'NormSubgraph', 'NormCluster'])
     parser.add_argument('--k', type=int, default=10, help="k used in K-NN clustering to build graph")
     parser.add_argument('--graph_file', type=str, 
                         default="../datasets/two_classes/no_label_leakage/G_NormExpressionSubgraph_k10.pkl",
                         help="Filepath of input graph")
     parser.add_argument('--kg_feature_path', type=str, 
-                        default="../datasets/bioFeatures/subgraph_features.csv")
+                        default="../datasets/bioFeatures/Subgraph.csv")
     parser.add_argument('--output_dir', type=str, default='../results')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--hidden_channels', type=int, default=64)
@@ -157,10 +157,16 @@ def main():
         graph_file = args.graph_file
     print(f"Using graph file: {graph_file}")
     G = load_graph(graph_file)
-    kg_features = get_kg_features(args.kg_feature_path)
+
+    # get kg_features according to dataset
+    if 'Cluster' in args.dataset:
+        kg_feature_path = "/home/xyu/thesis/FireGNN/datasets/bioFeatures/ExpressionCluster.csv"
+    else:
+        kg_feature_path = args.kg_feature_path
+    kg_features = get_kg_features(kg_feature_path)
     print(kg_features.shape)
     data=prepare_pyg_data(G=G,
-                          kg_feature_path=args.kg_feature_path,
+                          kg_feature_path=kg_feature_path,
                           kg_features=True,
                           topological_features=False)
     #data = prepare_pytorch_geometric_data(G)

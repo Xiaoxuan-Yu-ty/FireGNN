@@ -55,11 +55,11 @@ def main():
     # parser.add_argument('--train_auxiliary', action='store_true',
     #                    help='Train auxiliary task models')
     parser.add_argument('--kg_feature_path', type=str, 
-                        default="./datasets/bioFeatures/subgraph_features.csv")
+                        default="./datasets/bioFeatures/Subgraph.csv")
     parser.add_argument("--morpho_path", type=str, default="./datasets/G_Bloodmnist_inductive.gpickle")
-    parser.add_argument("--exp_path", type=str, default="./datasets/bioFeatures/exp_subgraphs.csv")
+    parser.add_argument("--exp_path", type=str, default="./datasets/bioFeatures/")
     parser.add_argument("--kge_path", type=str, default="./AD/data/composite_embed.pt")
-    parser.add_argument("--num_classes", type=int, default=2, choices=[2,3],
+    parser.add_argument("--num_classes", type=int, default=3, choices=[2,3],
                         help='Number of classes in patient data')
     parser.add_argument("--label_leakage", action="store_true",
                         help='If using labels info to build graphs')
@@ -87,7 +87,6 @@ def main():
     os.makedirs(save_dir, exist_ok=True)
     print(f'Output_dir is {save_dir}')
 
-
     # run pipeline for each dataset
     for ds in args.dataset:
         # run the pipline for each k-graph
@@ -103,6 +102,7 @@ def main():
                         f"--kge_path {args.kge_path} "
                         f"--k {args.k} "
                         f"--num_classes {args.num_classes} "
+                        f"--output_dir ./datasets"
                         
                         #f"--label_leakage "
                     )

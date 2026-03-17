@@ -62,8 +62,9 @@ def add_mask_to_graph(graph, features, output):
 
     return graph
 
-def get_features(expression_path, 
+def get_features(
                  design_path,
+                 expression_path=None, 
                  composite_embed_path=None, 
                  num_classes=2, 
                  normalization=True):
@@ -84,19 +85,21 @@ def get_features(expression_path,
     if composite_embed_path:
         data = torch.load(composite_embed_path)
         features = torch.stack([data[idx] for idx in data.keys()]).cpu().tolist()
-    
-    # expression features
-    data = pd.read_csv(expression_path, index_col=0)
-    if data.shape[0] != 744:
-        data = data.T
-    
-    if normalization:
-        # normalized expression features
-        exp_norm = (data - data.min())/(data.max()-data.min())
-        features = exp_norm.to_numpy()
+    elif expression_path:
+        # expression features
+        data = pd.read_csv(expression_path, index_col=0)
+        if data.shape[0] != 744:
+            data = data.T
+        
+        if normalization:
+            # normalized expression features
+            exp_norm = (data - data.min())/(data.max()-data.min())
+            features = exp_norm.to_numpy()
+        else:
+            # raw expression features
+            features = data.to_numpy()
     else:
-        # raw expression features
-        features = data.to_numpy()
+        print('Please privide a feature path')
     
     return features, labels
 
@@ -181,13 +184,13 @@ def rebuild_morpho_graphs(graph_path:str, dataset:str, k:int, output_dir:str,
 def main(): 
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default='NormExpressionSubgraph', 
-                        choices=['CompositeAD','CompositeADHealth', 'NormExpression', 'NormExpressionSubgraph', 'NormExpressionCluster', 'NormSubgraph', 'NormCluster','Bloodmnist','Organcmnist'], 
+                        choices=['Composite','CompositeAD','CompositeADHealth', 'NormExpression', 'NormExpressionSubgraph', 'NormExpressionCluster', 'NormSubgraph', 'NormCluster','Bloodmnist','Organcmnist'], 
                         help='Dataset to build graph with different k')
     parser.add_argument("--morpho_path", type=str, default="../datasets/G_Bloodmnist_inductive.gpickle")
-    parser.add_argument("--exp_path", type=str, default="../datasets/bioFeatures/exp_subgraphs.csv")
-    parser.add_argument("--labels_path", type=str, default="../AD/data/design_with_real_target.tsv")
-    parser.add_argument("--num_classes", type=int, default=2, choices=[2,3])
-    parser.add_argument("--kge_path", type=str, default="../AD/data/composite_embed.pt")
+    parser.add_argument("--exp_path", type=str, default="../datasets/bioFeatures/")
+    parser.add_argument("--labels_path", type=str, default="./AD/data/design_with_real_target.tsv")
+    parser.add_argument("--num_classes", type=int, default=3, choices=[2,3])
+    parser.add_argument("--kge_path", type=str, default="./AD/data/composite_embed.pt")
     parser.add_argument("--k", type=int, default=30, help="Number of k graphs to build with k in K-NN clustering")
     parser.add_argument("--output_dir", type=str, default="../datasets")
     parser.add_argument("--label_leakage", action="store_true")
@@ -207,7 +210,8 @@ def main():
 
     os.makedirs(save_dir, exist_ok=True)
     print(f'Output_dir is {save_dir}')
-    
+
+    # get features file according to datatset
     if args.dataset == 'Bloodmnist' or args.dataset == 'Organcmnist':
         rebuild_morpho_graphs(graph_path=args.morpho_path,
                                 k=args.k, 
@@ -215,10 +219,25 @@ def main():
                                 output_dir=save_dir,
                                 add_label_edges=args.label_leakage,
                                 rewire_edges=args.label_leakage)
-    else:
-        features, labels = get_features(expression_path=args.exp_path,
+    elif 'Composite' in args.dataset:
+        features, labels = get_features(
                                         design_path=args.labels_path,
                                         composite_embed_path=args.kge_path,
+                                        num_classes=args.num_classes,
+                                        normalization=True
+                                        )
+        build_and_save_patient_graph(features=features,
+                                        labels=labels,
+                                        dataset=args.dataset,
+                                        k=args.k,
+                                        output_dir=save_dir,
+                                        add_label_edges=args.label_leakage,
+                                        rewire_edges=args.label_leakage,
+                                )
+    else:
+        exp_path = os.path.join(args.exp_path, f'{args.dataset[4:]}.csv')
+        features, labels = get_features(expression_path=exp_path,
+                                        design_path=args.labels_path,
                                         num_classes=args.num_classes,
                                         normalization=True
                                         )
