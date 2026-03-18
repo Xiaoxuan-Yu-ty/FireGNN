@@ -1,3 +1,4 @@
+import argparse
 import os
 import json
 import pandas as pd
@@ -46,7 +47,7 @@ def load_metrics(root_dir):
     df = df.sort_values(by=['dataset','model','k'], ascending=[True, True, True])            
     return df
 
-def plot_k_comparison(df, metric_name='Accuracy'):
+def plot_k_comparison(df, output:str, metric_name='Accuracy'):
     datasets = df['dataset'].unique()
     for ds in datasets:
         dff = df[df['dataset'] == ds]
@@ -56,9 +57,11 @@ def plot_k_comparison(df, metric_name='Accuracy'):
         plt.ylabel(metric_name.capitalize())
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
-        plt.show()
+        #plt.show()
+        img_name = f"KComparisonOn{ds}_{metric_name}"
+        plt.savefig(os.path.join(output, img_name))
 
-def plot_best_models(df, metric_name='F1-Score'):
+def plot_best_models(df, output, metric_name='F1-Score'):
     for ds in df['dataset'].unique():
         dff = df[df['dataset']==ds]
         idx = dff.groupby(['model', 'dataset'])[metric_name].idxmax()
@@ -80,10 +83,13 @@ def plot_best_models(df, metric_name='F1-Score'):
                      color='white', fontweight='bold')
             
         plt.title(f'Comparison of Best Models ({metric_name}) on {ds}')
-        plt.show()
+        #plt.show()
+        img_name = f"BestModelsOn{ds}_{metric_name}"
+        plt.savefig(os.path.join(output, img_name))
+        
 
 
-def plot_dataset_comparison(df, metric_name='F1-Score', hue='modelType'):
+def plot_dataset_comparison(df, output:str, metric_name='F1-Score', hue='modelType'):
     # Get best k for each model-dataset pair
     idx = df.groupby([hue, 'dataset'])[metric_name].idxmax()
     best_df = df.loc[idx]
@@ -106,4 +112,36 @@ def plot_dataset_comparison(df, metric_name='F1-Score', hue='modelType'):
 
     plt.legend(title='Model', bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
-    plt.show()
+    #plt.show()
+    img_name = f"DatasetComparison{hue}_{metric_name}"
+    plt.savefig(os.path.join(output, img_name))
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root_dir", type=str, default="../results/two_classes/no_label_leakage")
+    parser.add_argument("--plot_k_comparison", action="store_true",
+                        )
+    parser.add_argument("--plot_best_models", action="store_true")
+    parser.add_argument("--plot_dataset_compariosn", action="store_true")
+    args = parser.parse_args()
+    save_dir = os.path.join(args.root_dir,'metrics')
+    os.makedirs(save_dir, exist_ok=True)
+
+    df = load_metrics(args.root_dir)
+    
+    if args.plot_k_comparison:
+        for metric in ['Accuracy','Precision','Recall',	'F1-Score',	'AUROC']:
+            plot_k_comparison(df, save_dir, metric)
+    if args.plot_best_models:
+        for metric in ['Accuracy','Precision','Recall',	'F1-Score',	'AUROC']:
+            plot_best_models(df, save_dir, metric)
+    if args.plot_dataset_comparison:
+        for metric in ['Accuracy','Precision','Recall',	'F1-Score',	'AUROC']:
+            plot_dataset_comparison(df, save_dir, metric, 'model')
+            plot_dataset_comparison(df, save_dir, metric, 'modelType')
+
+
+
+
+if __name__ == "__main__":
+    main()
