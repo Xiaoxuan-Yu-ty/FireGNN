@@ -126,7 +126,6 @@ def main():
                         choices=['gcn', 'gat', 'gin'])
     parser.add_argument('--dataset', type=str, 
                         default='Bloodmnist', 
-                        choices=['Composite','CompositeAD','CompositeADHealth', 'NormExpression', 'NormExpressionSubgraph', 'NormExpressionCluster', 'NormSubgraph', 'NormCluster','Bloodmnist','Organcmnist'],
                        help='Dataset to use')
     parser.add_argument('--k', type=int, default=8)
     parser.add_argument('--graph_file', type=str, default='../datasets/G_Bloodmnist_k1.pkl')

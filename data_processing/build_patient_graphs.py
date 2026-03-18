@@ -113,7 +113,7 @@ def build_and_save_patient_graph(features,
                                 ):
     # build graph with different ks
     graph_info = {}
-    for i in range(2,k):
+    for i in range(5,k):
         graph_info[i]={}
         graph = build_knn_graph_from_features(features=features,
                                                         labels=labels,
@@ -157,7 +157,7 @@ def rebuild_morpho_graphs(graph_path:str, dataset:str, k:int, output_dir:str,
         test_mask.append(test)
     
     graph_info = {}
-    for i in range(1,k):
+    for i in range(5,k):
         graph_info[i] = defaultdict(dict)
         graph = build_knn_graph_from_features(features=features, 
                                             labels=labels, 
@@ -183,15 +183,14 @@ def rebuild_morpho_graphs(graph_path:str, dataset:str, k:int, output_dir:str,
 
 def main(): 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, default='NormExpressionSubgraph', 
-                        choices=['Composite','CompositeAD','CompositeADHealth', 'NormExpression', 'NormExpressionSubgraph', 'NormExpressionCluster', 'NormSubgraph', 'NormCluster','Bloodmnist','Organcmnist'], 
+    parser.add_argument("--dataset", type=str, default='Bloodmnist',  
                         help='Dataset to build graph with different k')
     parser.add_argument("--morpho_path", type=str, default="../datasets/G_Bloodmnist_inductive.gpickle")
     parser.add_argument("--exp_path", type=str, default="../datasets/bioFeatures/")
-    parser.add_argument("--labels_path", type=str, default="./AD/data/design_with_real_target.tsv")
+    parser.add_argument("--labels_path", type=str, default="../AD/data/design_with_real_target.tsv")
     parser.add_argument("--num_classes", type=int, default=3, choices=[2,3])
-    parser.add_argument("--kge_path", type=str, default="./AD/data/composite_embed.pt")
-    parser.add_argument("--k", type=int, default=30, help="Number of k graphs to build with k in K-NN clustering")
+    parser.add_argument("--kge_path", type=str, default="../AD/data/composite_embed.pt")
+    parser.add_argument("--k", type=int, default=20, help="Number of k graphs to build with k in K-NN clustering")
     parser.add_argument("--output_dir", type=str, default="../datasets")
     parser.add_argument("--label_leakage", action="store_true")
     

@@ -56,10 +56,11 @@ def plot_k_comparison(df, output:str, metric_name='Accuracy'):
         plt.title(f'{metric_name} Comparison across different k values on {ds} dataset')
         plt.ylabel(metric_name.capitalize())
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
         #plt.show()
         img_name = f"KComparisonOn{ds}_{metric_name}"
-        plt.savefig(os.path.join(output, img_name))
+        plt.tight_layout()
+        plt.savefig(os.path.join(output, img_name), bbox_inches='tight')
+        plt.close()
 
 def plot_best_models(df, output, metric_name='F1-Score'):
     for ds in df['dataset'].unique():
@@ -85,7 +86,9 @@ def plot_best_models(df, output, metric_name='F1-Score'):
         plt.title(f'Comparison of Best Models ({metric_name}) on {ds}')
         #plt.show()
         img_name = f"BestModelsOn{ds}_{metric_name}"
-        plt.savefig(os.path.join(output, img_name))
+        plt.tight_layout()
+        plt.savefig(os.path.join(output, img_name), bbox_inches='tight')
+        plt.close()
         
 
 
@@ -111,18 +114,19 @@ def plot_dataset_comparison(df, output:str, metric_name='F1-Score', hue='modelTy
     plt.title(f'{metric_name} Comparison Across Datasets')
 
     plt.legend(title='Model', bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.tight_layout()
     #plt.show()
     img_name = f"DatasetComparison{hue}_{metric_name}"
-    plt.savefig(os.path.join(output, img_name))
+    plt.tight_layout()
+    plt.savefig(os.path.join(output, img_name), bbox_inches='tight')
+    plt.close()
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root_dir", type=str, default="../results/two_classes/no_label_leakage")
-    parser.add_argument("--plot_k_comparison", action="store_true",
+    parser.add_argument("--plot_k_comparison", action="store_true"
                         )
     parser.add_argument("--plot_best_models", action="store_true")
-    parser.add_argument("--plot_dataset_compariosn", action="store_true")
+    parser.add_argument("--plot_dataset_comparison", action="store_true")
     args = parser.parse_args()
     save_dir = os.path.join(args.root_dir,'metrics')
     os.makedirs(save_dir, exist_ok=True)
