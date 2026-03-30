@@ -37,7 +37,7 @@ def main():
                         default=['NormExpression','Composite'],
                         choices=['Composite','CompositeAD','CompositeADHealth', 'NormExpression', 'NormExpressionSubgraph', 'NormExpressionCluster', 'NormSubgraph', 'NormCluster','Bloodmnist','Organcmnist'],
                        help='Dataset to use')
-    parser.add_argument('--k', type=int, default=16, help='Number of clusters in K-NN')
+    parser.add_argument('--k', type=int, default=20, help='Number of clusters in K-NN')
     parser.add_argument('--models', type=str, nargs='+', default=['gcn', 'gat', 'gin'],
                        choices=['gcn', 'gat', 'gin'],
                        help='Models to train')
@@ -55,15 +55,15 @@ def main():
     # parser.add_argument('--train_auxiliary', action='store_true',
     #                    help='Train auxiliary task models')
     parser.add_argument('--kg_feature_path', type=str, 
-                        default="./datasets/bioFeatures/BPsubgraphs.csv")
+                        default="./datasets/bioFeatures/ADPPIPaths.csv")
     parser.add_argument("--morpho_path", type=str, default="./datasets/G_Bloodmnist_inductive.gpickle")
     parser.add_argument("--exp_path", type=str, default="./datasets/bioFeatures/")
     parser.add_argument("--kge_path", type=str, default="./AD/data/composite_embed.pt")
-    parser.add_argument("--num_classes", type=int, default=2, choices=[2,3],
+    parser.add_argument("--num_classes", type=int, default=3, choices=[2,3],
                         help='Number of classes in patient data')
     parser.add_argument("--label_leakage", action="store_true",
                         help='If using labels info to build graphs')
-    parser.add_argument('--output_dir', type=str, default='results/bp_ego_features',
+    parser.add_argument('--output_dir', type=str, default='results/ad_ppi_paths',
                        help='Output directory')
     parser.add_argument('--epochs', type=int, default=200,
                        help='Number of training epochs')
@@ -90,7 +90,7 @@ def main():
     # run pipeline for each dataset
     for ds in args.dataset:
         # run the pipline for each k-graph
-        for i in range(6,args.k):
+        for i in range(2,args.k):
             # Build graph from scratch is graph file is not existing
             graph_file = f"datasets/{num_classes}/{label_leakage}/G_{ds}_k{i}.pkl"
             if not os.path.exists(graph_file):

@@ -136,7 +136,7 @@ def main():
                         default="../datasets/two_classes/no_label_leakage/G_NormExpressionSubgraph_k10.pkl",
                         help="Filepath of input graph")
     parser.add_argument('--kg_feature_path', type=str, 
-                        default="../datasets/bioFeatures/BPsubgraphs.csv")
+                        default="../datasets/bioFeatures/ADPPIPaths.csv")
     parser.add_argument('--output_dir', type=str, default='../results')
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--hidden_channels', type=int, default=64)
