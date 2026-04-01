@@ -30,9 +30,6 @@ sys.path.append(os.path.dirname(base_dir))
 from utils.graph_utils import (
     load_graph,
     build_knn_graph_from_features,
-    prepare_pytorch_geometric_data,
-    create_fuzzy_rules,
-    get_device,
     save_graph
 )
 
@@ -102,6 +99,28 @@ def get_features(
         print('Please privide a feature path')
     
     return features, labels
+
+def build_one_patient_graph(features,
+                                labels,
+                                k:int, 
+                                add_label_edges=True,
+                                rewire_edges=True,
+                                ):
+    # build graph with one k
+    graph_info = {}
+    graph = build_knn_graph_from_features(features=features,
+                                                    labels=labels,
+                                                    k=k,
+                                                    add_label_edges=add_label_edges,
+                                                    rewire_edges=rewire_edges,
+                                                    )
+    print("The Number of Connected Components:", nx.number_connected_components(graph))
+    graph_info['components'] = nx.number_connected_components(graph)
+    graph_info['nodes'] = nx.number_of_nodes(graph)
+    graph_info['edges'] = nx.number_of_edges(graph)
+    
+    return graph
+
 
 def build_and_save_patient_graph(features,
                                 labels,

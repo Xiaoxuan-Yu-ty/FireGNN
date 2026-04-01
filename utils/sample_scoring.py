@@ -2,8 +2,11 @@
 
 """Carry out Radical search to identify extreme samples in the dataset and give them a single sample score."""
 
+import os
 from typing import Callable, Optional, List, Tuple, Any
-
+from scipy import stats
+from statsmodels.stats.multitest import multipletests
+import warnings
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
@@ -18,7 +21,7 @@ def do_radical_search(
         data: pd.DataFrame,
         design: pd.DataFrame,
         threshold: float,
-        control: str,
+        control: str|int,
         control_based: bool
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Identify the samples with extreme feature values either based on the entire dataset or control population.
@@ -31,8 +34,11 @@ def do_radical_search(
     :return: Dataframe containing the Single Sample scores using radical searching
     """
     # Transpose matrix to get the patients as the rows
-    data_transpose = data.transpose()
-
+    if all(s in data.columns for s in design.index[:5]):
+        data_transpose = data.transpose()
+    else:
+        data_transpose = data
+    print(f"Transposed data shape: {data_transpose.shape}, supposed to be [sample, gene]")
     # Give each label an integer to represent the labels during classification
     label_mapping = {
         key: val
@@ -157,92 +163,147 @@ def _apply_func(
 
     return final_df
 
-def do_z_score(
-        data: pd.DataFrame,
-        design: pd.DataFrame,
-        control: str = 'Control',
-        threshold: float = 2.0,
-) -> pd.DataFrame:
-    """Carry out Z-Score based single sample DE analysis.
 
-    :param data: Dataframe containing the gene expression values
-    :param design: Dataframe containing the design table for the data
-    :param control: label used for representing the control in the design table of the data
-    :param threshold: Threshold for choosing patients that are "extreme" w.r.t. the controls.
-    :return: Dataframe containing the Single Sample scores using Z_Scores
+def do_biological_logfc(
+    data: pd.DataFrame,
+    design: pd.DataFrame,
+    threshold: float = 0.1,
+    alpha: float = 0.05,
+    control: str|int = 0
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    # Check if the control variable is as per the R Naming standards
-    assert control[0].isalpha(), "Please pass the control indicator contains atleast 1 alphabet."
-
-    # Transpose matrix to get the patients as the rows
-    data = data.transpose()
-
-    # Give each label an integer to represent the labels during classification
-    label_mapping = {
-        key: val
-        for val, key in enumerate(np.unique(design['Target']))
-    }
-
-    # Make sure the number of rows of transposed data and design are equal
-    assert len(data) == len(design)
-
-    # Extract the controls from the dataset
-    controls = data[list(design.Target == control)]
-
-    # Calculate the "Z Score" of each individual patient
-    mean = controls.mean(axis=0)
-    std = controls.std(axis=0)
-    z_scores = (data - mean) / std
-
-    out_z_scores = z_scores.copy()
-
-    # Values that are greater than the 2 sigma or lesser than negative 2 sigma are considered as extremes
-
-    out_z_scores[z_scores > threshold] = 1
-    out_z_scores[z_scores < -threshold] = -1
-
-    # Values between upper and lower limit are assigned 0
-    out_z_scores[(z_scores < threshold) & (z_scores > -threshold)] = 0
-
-    df = pd.DataFrame(data=out_z_scores, index=data.index, columns=data.columns)
-
-    label = design['Target'].map(label_mapping)
-    label.reset_index(drop=True, inplace=True)
-
-    output_df = df.apply(_bin).copy()
-
-    output_df['label'] = label.values
-
-    return output_df
-
-
-def _bin(row: pat.Series[int]) -> List[int]:
-    """Replace values greater than 0 as 1 and lesser than 0 as -1."""
-    return [
-        1 if (val > 0) else (-1 if (val < 0) else 0)
-        for val in row
-    ]
-
-
-def do_avg_score(data: pd.DataFrame, design:pd.DataFrame, output_dir):
-
-    data = data.transpose()
-    assert len(data) == len(design)
-
-    avg_patient = data.mean(axis=1)
-    avg_gene = data.mean(axis=0)
-
-    pat_score = data.copy()
-    gene_score = data.copy()
-
-    # score based on patient-level average
-    for idx in pat_score.index:
-        pat_score.loc[idx,:] = [1 if x>= avg_patient.loc[idx] else 0 for x in pat_score.loc[idx].values]
-        
-    # score based on gene-leval average
-    for col in gene_score.columns:
-        gene_score.loc[:, col] = [1 if x>=avg_gene.loc[col] else 0 for x in gene_score[col].values]
-    pat_score.to_csv(f'{output_dir}/adni_patient_avg.csv')
-    gene_score.to_csv(f'{output_dir}/adni_gene_average.csv')
+    Identifies 'Radicals' based on the Volcano Plot regions:
+    1  (Red):  logFC > threshold  AND  adj.P-value < alpha
+    -1 (Blue): logFC < -threshold AND  adj.P-value < alpha
+    0  (Gray): Does not meet both criteria.
+    """
+    # 1. Safety Check: Is the data log-scaled?
+    max_val = np.percentile(data.values, 99)
     
-    return pat_score, gene_score 
+    if max_val > 50:
+        warnings.warn(f"Data appears to be raw counts (Max: {max_val:.2f}). Applying log2(x + 1) transformation.")
+        # Apply log2 transformation: adding 1 avoids log(0) errors
+        working_data = np.log2(data + 1)
+        if not isinstance(working_data, pd.DataFrame):
+            working_data = pd.DataFrame(working_data, index=data.index, columns=data.columns)
+    else:
+        working_data = data.copy()
+    print(f"Working data shape: {working_data.shape}")
+    
+    # 2. Align data and design -> data_t[samples, genes]
+    if all(s in working_data.columns for s in design.index[:5]):
+        data_t = working_data.transpose()
+    else:
+        data_t = working_data
+        working_data = working_data.transpose()
+         
+    print(f"Transpose data shape: {data_t.shape}, supposed to be [sample * gene]")
+
+    control_idx = design[design['Target'] == control].index.to_list()
+    case_idx = design[design['Target'] != control].index.to_list()
+    
+    # 3. Statistical Testing (Gene by Gene)
+    results = []
+    for gene in working_data.index:
+        control_vals = working_data.loc[gene, control_idx]
+        case_vals = working_data.loc[gene, case_idx]
+        
+        # Calculate Mean LogFC (Case Mean - Control Mean)
+        mean_logfc = case_vals.mean() - control_vals.mean()
+    
+        # Handle zero variance to prevent NaNs
+        if control_vals.var() == 0 and case_vals.var() == 0:
+            p_val = 1.0
+        else:
+            # Perform Welch's T-Test (Comparing the two distributions): equal_var=False
+            _, p_val = stats.ttest_ind(case_vals, control_vals, equal_var=False, nan_policy='omit')
+            if np.isnan(p_val): p_val = 1.0 # type: ignore
+        
+        results.append({'gene': gene, 'logFC': mean_logfc, 'p_value': p_val})
+    
+    stats_df = pd.DataFrame(results).set_index('gene')
+    
+    # 4. Multiple Testing Correction (FDR / Benjamini-Hochberg)
+    # This prevents false positives when testing thousands of genes
+    stats_df['adj_P_val'] = multipletests(stats_df['p_value'], method='fdr_bh')[1]
+
+    # 5. Scoring the Samples (The 'Volcano' Logic)
+    # Initialize output matrix [samples x genes]
+    output_df = pd.DataFrame(0, index=data_t.index, columns=working_data.index)
+    
+    # We only mark a gene as 1 or -1 if the GENE ITSELF is significant overall
+    # and the individual sample's expression is extreme.
+    for gene in working_data.index:
+        gene_stats = stats_df.loc[gene]
+        
+        if gene_stats['adj_P_val'] < alpha:
+            # Calculate sample-specific deviation from control mean
+            ctrl_mean = working_data.loc[gene, control_idx].mean()
+            sample_deviations = data_t[gene] - ctrl_mean
+            
+            # Upper-Red Region (Significant Up)
+            output_df.loc[sample_deviations > threshold, gene] = 1
+            # Upper-Blue Region (Significant Down)
+            output_df.loc[sample_deviations < -threshold, gene] = -1
+
+    # 6. Create the Summary with counts (-1, 0, 1)
+    # We transpose output_df back to [genes x counts] to match stats_df
+    counts = output_df.apply(pd.Series.value_counts).fillna(0).astype(int).T
+    
+    # Ensure all three columns exist even if some aren't present in the data
+    for col in [-1, 0, 1]:
+        if col not in counts.columns:
+            counts[col] = 0
+            
+    # Rename columns for clarity
+    counts = counts.rename(columns={-1: 'count_neg', 0: 'count_neutral', 1: 'count_pos'})
+    
+    # Combine stats and counts
+    summary_df = pd.concat([stats_df, counts[['count_neg', 'count_neutral', 'count_pos']]], axis=1)
+    
+    # 7. Metadata and Summary
+    label_mapping = {key: val for val, key in enumerate(np.unique(design['Target']))}
+    output_df['label'] = design.loc[output_df.index, 'Target'].map(label_mapping)
+    
+    
+    return output_df, summary_df
+
+def process_and_save(
+    data: pd.DataFrame, 
+    design: pd.DataFrame, 
+    threshold: float, 
+    control: str|int,
+    do_function,
+    output_dir: str,
+    method: str = 'logfc',
+    **kwards
+):
+    """
+    Wrapper to run the search, show progress, and save results.
+    """
+    # Create directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created directory: {output_dir}")
+
+    print(f"Starting {method} analysis...")
+    
+    # Simple progress bar for the high-level step
+    with tqdm(total=2, desc="Overall Progress") as pbar:
+        # 1. do sample scoring
+        output_df, summary_df = do_function(data, design, threshold, control=control, **kwards)
+        
+        pbar.update(1)
+        
+        # 2. Save the files
+        out_path = os.path.join(output_dir, f"sample_scoring_{method}.csv")
+        sum_path = os.path.join(output_dir, f"scoring_summary_{method}.csv")
+        #sum_path_2 = os.path.join(output_dir, f"scoring_summary1_{method}.csv")
+        
+        output_df.to_csv(out_path)
+        summary_df.to_csv(sum_path)
+        #summary_df_2.to_csv(sum_path_2)
+        pbar.update(1)
+
+    print(f"Done! Files saved to {output_dir}")
+    return output_df, summary_df
