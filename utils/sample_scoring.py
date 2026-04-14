@@ -171,11 +171,15 @@ def do_biological_logfc(
     alpha: float = 0.05,
     control: str|int = 0
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+   
     """
-    Identifies 'Radicals' based on the Volcano Plot regions:
-    1  (Red):  logFC > threshold  AND  adj.P-value < alpha
-    -1 (Blue): logFC < -threshold AND  adj.P-value < alpha
-    0  (Gray): Does not meet both criteria.
+    Identifies 'Radicals' based on the logFC Volcano Plot regions:
+    1 (overexpressed):  logFC > threshold  AND  adj.P-value < alpha
+    -1 (underexpressed): logFC < -threshold AND  adj.P-value < alpha
+    0 : Does not meet both criteria.
+
+    Returns:
+        _type_: _description_
     """
     # 1. Safety Check: Is the data log-scaled?
     max_val = np.percentile(data.values, 99)
@@ -267,6 +271,86 @@ def do_biological_logfc(
     
     
     return output_df, summary_df
+
+def do_std(
+    data: pd.DataFrame,
+    design: pd.DataFrame,
+    threshold: float,
+    control: str|int
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+
+    """  Identifies 'Radicals' based on the Standard Deviation of the Control group.
+    1  : Sample_Value > (Control_Mean + threshold * Control_Std)
+    -1 : Sample_Value < (Control_Mean - threshold * Control_Std)
+    0  : Within the expected variation of Controls
+
+    Params:
+        data: Dataframe gene expression values (assumed log-scaled)
+        design: Dataframe [samples x info] containing the 'Target' column
+        threshold: std multiplier
+        control: The string or int label for the control group
+
+    Returns:
+        Tuple[pd.Dataframe, pd.DataFrame]: _description_
+    """
+
+    # 1. Safety Check: Is the data log-scaled?
+    max_val = np.percentile(data.values, 99)
+    
+    if max_val > 50:
+        warnings.warn(f"Data appears to be raw counts (Max: {max_val:.2f}). Applying log2(x + 1) transformation.")
+        # Apply log2 transformation: adding 1 avoids log(0) errors
+        working_data = np.log2(data + 1)
+        if not isinstance(working_data, pd.DataFrame):
+            working_data = pd.DataFrame(working_data, index=data.index, columns=data.columns)
+    else:
+        working_data = data.copy()
+    print(f"Working data shape: {working_data.shape}")
+    
+    # 2. Align data and design -> data_t[samples, genes]
+    if all(s in working_data.columns for s in design.index[:5]):
+        data_t = working_data.transpose()
+    else:
+        data_t = working_data 
+    print(f"Transpose data shape: {data_t.shape}, supposed to be [sample * gene]")
+
+    # 3. Calculate the Mean and std of the Control Group for every gene
+    control_samples = design[design['Target'] == control].index
+    valid_controls = control_samples.intersection(data_t.index)
+    
+    # Calculate stats across the control rows
+    control_stats = data_t.loc[valid_controls].agg(['mean', 'std'], axis=0).T
+    control_stats['std'] = np.where(control_stats['std'] == 0, 1e-6, control_stats['std'])
+    
+    # 4. Scoring Logic (Vectorized)
+    # Reindex bounds to match data_t columns exactly
+    upper_bound = control_stats['mean'] + (threshold * control_stats['std'])
+    lower_bound = control_stats['mean'] - (threshold * control_stats['std'])
+
+    # Efficiently create the -1, 0, 1 matrix
+    output_df = pd.DataFrame(0, index=data_t.index, columns=data_t.columns)
+    output_df[data_t > upper_bound] = 1
+    output_df[data_t < lower_bound] = -1
+
+    # 5. Summary Statistics (Safe Alignment)
+    summary_df = control_stats.copy().rename(columns={'mean': 'control_mean', 'std': 'control_std'})
+    
+    # Count occurrences of -1, 0, 1 for each gene
+    # value_counts() on the columns of output_df
+    counts = output_df.apply(lambda x: x.value_counts()).fillna(0).T
+    
+    # Map the count columns specifically using reindex to avoid NaNs
+    summary_df['count_neg'] = counts.reindex(columns=[-1]).iloc[:, 0].fillna(0).astype(int)
+    summary_df['count_neutral'] = counts.reindex(columns=[0]).iloc[:, 0].fillna(0).astype(int)
+    summary_df['count_pos'] = counts.reindex(columns=[1]).iloc[:, 0].fillna(0).astype(int)
+
+    # 6. Add labels
+    label_mapping = {key: val for val, key in enumerate(np.unique(design['Target']))}
+    output_df['label'] = design.loc[output_df.index, 'Target'].map(label_mapping)
+    
+    summary_df_1 = output_df.apply(pd.Series.value_counts)
+    
+    return output_df, summary_df_1
 
 def process_and_save(
     data: pd.DataFrame, 

@@ -237,7 +237,7 @@ def train_one_epoch(
     )
 
     # 3. Joint loss
-    loss = cls_loss + lambda_link * link_loss
+    loss = (1-lambda_link)*cls_loss + lambda_link * link_loss
 
     loss.backward()
     optimizer.step()
@@ -263,6 +263,7 @@ def train(
     best_state = None
     train_history = {}
     for epoch in tqdm(range(epochs), desc="Training HeteoGNN"):
+        epoch_history = {}
         losses = train_one_epoch(
                                                     model,
                                                     data,
@@ -279,8 +280,9 @@ def train(
                                                 train_edge_index_dict=train_edges,
                                                 split="val"
                                             )
-        train_history['loss'] = losses
-        train_history['validation'] = val_metrics
+        epoch_history['loss'] = losses
+        epoch_history['validation'] = val_metrics
+        train_history[epoch] = epoch_history
 
         if val_metrics["acc"] > best_val:
             best_val = val_metrics["acc"]
@@ -355,7 +357,7 @@ def main():
     parser.add_argument("--dropout", type=float, default=0.3)
 
     # Training
-    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--lambda_link", type=float, default=0.5)

@@ -233,6 +233,33 @@ def process_kg_for_gnn(kg: nx.MultiDiGraph, causal_keywords: list|set):
     
     return cleaned_kg, reversed_kg
 
+def rename_node_edge_ids(kg):
+    """Rename helathy-Aging-KG node ids to <bel> and edge ids to <src-bel, realtion, dst-bel>
+
+    Args:
+        kg (nx.MultiDiGraph): Healthy-Aging-KG
+
+    Returns:
+        nx.MultiDiGraph: new kg with updated node and edge ids
+    """
+    mapping = {}
+    for node, data in kg.nodes(data=True):
+        name = data.get('bel')
+        mapping[node] = name
+    
+    # change node ids
+    kg = nx.relabel_nodes(kg, mapping, copy=True)
+
+    # change edge ids
+    new_kg = nx.MultiDiGraph()
+    new_kg.add_nodes_from(kg.nodes(data=True))
+    for u,v,old_rel, data in kg.edges(data=True, keys=True):
+        new_rel = data.get('type')
+        new_kg.add_edge(u,v,new_rel, **data)
+    
+    return new_kg
+
+
 def sanitize_node_types(G):
     """
     Standardizes node types while preserving existing PascalCase names.

@@ -26,15 +26,6 @@ from data_processing.patient_network_prep import (causal_relations,
                                                   process_kg_for_gnn,
                                                   sanitize_node_types)
 
-
-def gene_symbol_extractor(text, pattern:str):
-    # ^ ensures start at the beginning, $ ensures end at the ')'
-    match = re.search(pattern, text)
-    if match:
-        target = match.group(1)
-        return target.upper()
-    return None
-
 def add_patient_attrs(G:nx.MultiDiGraph,
                     features_df, 
                     labels_series, 
@@ -63,15 +54,7 @@ def add_patient_attrs(G:nx.MultiDiGraph,
                    type='Patient') # Added type for HeteroData clarity
     return G
     
-
-def build_knn_graph_with_masks(features_df, labels_series, k=8, metric='cosine', 
-                              add_label_edges=True, rewire_edges=True,
-                              split_ratio=(0.7, 0.15, 0.15),
-                              base_graph_type=nx.DiGraph):
-    """
-    Builds a k-NN graph with Patient IDs as node names, original rewiring logic,
-    and randomized train/val/test masks.
-    """
+def create_shuffled_train_val_test_masks(features_df, labels_series, split_ratio = [0.6, 0.2, 0.2]):
     # 1. Shuffle and Split Data
     patient_ids = features_df.index.tolist()
     # Shuffle indices to mix Disease and Control
@@ -81,6 +64,22 @@ def build_knn_graph_with_masks(features_df, labels_series, k=8, metric='cosine',
     val_size_adj = split_ratio[1] / (split_ratio[1] + split_ratio[2])
     val_ids, test_ids = train_test_split(temp_ids, train_size=val_size_adj, stratify=labels_series.loc[temp_ids])
 
+    return train_ids, val_ids, test_ids
+
+
+def build_knn_graph_with_masks(features_df, labels_series, k=8, metric='cosine', 
+                              add_label_edges=True, rewire_edges=True,
+                              split_ratio=(0.7, 0.15, 0.15),
+                              base_graph_type=nx.MultiDiGraph):
+    """
+    Builds a k-NN graph with Patient IDs as node names, original rewiring logic,
+    and randomized train/val/test masks.
+    """
+    # 1. prepare data
+    patient_ids = features_df.index.tolist()
+    # create train, val, test masks
+    train_ids, val_ids, test_ids = create_shuffled_train_val_test_masks(features_df, labels_series, split_ratio)
+    
     # Map ID to its position in the original matrix for k-NN lookup
     id_to_pos = {pid: i for i, pid in enumerate(patient_ids)}
     pos_to_id = {i: pid for i, pid in enumerate(patient_ids)}
@@ -164,9 +163,9 @@ def build_knn_graph_with_masks(features_df, labels_series, k=8, metric='cosine',
     # Add edges
     for u, v, w in edge_list:
         if tuple(sorted((u, v))) not in edges_to_remove:
-            # For DiGraph, we add edges in both directions to simulate undirected similarity
-            G.add_edge(u, v, weight=float(w), relation='similar')
-            G.add_edge(v, u, weight=float(w), relation='similar')
+            # add edges in both directions to simulate undirected similarity
+            G.add_edge(u, v, relation='similar', weight=float(w))
+            G.add_edge(v, u, relation='similar', weight=float(w))
             
     return G
 
@@ -181,7 +180,158 @@ class PatientNetworkGenerator:
         
         self.relation_map = {1: 'up_reg', -1: 'down_reg'}
 
-    def _get_symbol_mapping(self, graph: nx.Graph, pattern: str):
+    def gene_symbol_extractor(self, text, pattern:str):
+        # ^ ensures start at the beginning, $ ensures end at the ')'
+        match = re.search(pattern, text)
+        if match:
+            target = match.group(1)
+            return target.upper()
+        return None
+
+    def get_symbol_mapping(self, graph: nx.Graph, pattern: str):
+        """Helper function to create {gene_symbol: kg_node} mapping"""
+        mapping = {}
+        if graph is None: return mapping
+        for node in graph.nodes:
+            symbol = self.gene_symbol_extractor(node, pattern)
+            if symbol:
+                mapping[symbol] = node
+        return mapping
+
+    def generate_hybrid_network(
+                                self, 
+                                data: pd.DataFrame, 
+                                exp_df: pd.DataFrame, 
+                                pattern_disease: str,
+                                pattern_control:str,
+                                disease_label: int = 1,
+                                control_label: int = 0
+                            ) -> Tuple[nx.Graph, pd.DataFrame, pd.Series]:
+        """
+        Generates a combined network:
+        1. Patient-Patient network via K-NN clustering based on Cosine Similarity.
+        2. Disease Patients -> KG_Disease.
+        3. Control Patients -> KG_Control.
+        """
+        # 1. Setup and Mappings
+        patient_labels = data['label'].to_dict()
+        scores = data.drop(columns=['label'])
+        
+        map_disease = self.get_symbol_mapping(self.kg_disease, pattern_disease)
+        map_control = self.get_symbol_mapping(self.kg_healthy, pattern_control)
+
+        # Initialize the big network with both KGs combined
+        # nx.compose merges nodes and edges from both graphs
+        full_graph = nx.compose(self.kg_disease, self.kg_healthy)
+        
+        # 2. Add Patient-Patient Similarity Edges (Cosine)
+        print("Contructing Patient-Patient Netwrok")
+        patient_graph = build_knn_graph_with_masks(features_df=exp_df,
+                                                   labels_series=data['label'],
+                                                   k=5,
+                                                   base_graph_type=type(full_graph))
+        full_graph = nx.compose(full_graph, patient_graph)
+        
+        # 3. Add Patient-Protein Edges based on Label
+        # Initialize summary_df
+        summary_df = pd.DataFrame(0, index=data.index, columns=['pos_edges', 'neg_edges'])
+
+        # Explicitly add the mask columns as boolean/object types
+        summary_df['train'] = False
+        summary_df['val'] = False
+        summary_df['test'] = False
+        summary_df['linked_nodes'] = [[] for _ in range(len(summary_df))] # Initialize with empty lists
+        summary_df['label'] = data['label'].to_list()
+        # Pre-fill the masks for all patients from the patient_graph
+        for patient in summary_df.index:
+            node_attrs = patient_graph.nodes[patient]
+            summary_df.at[patient, 'train'] = node_attrs.get('train_mask', False)
+            summary_df.at[patient, 'val'] = node_attrs.get('val_mask', False)
+            summary_df.at[patient, 'test'] = node_attrs.get('test_mask', False)
+            # Initialize an empty list for each patient to store linked symbols/nodes
+            summary_df.at[patient, 'linked_nodes'] = []
+        
+        # Identify radicals to iterate over
+        all_common = set(map_disease.keys()) | set(map_control.keys()) # find union gene symbols in both KGs
+        common_cols = [c for c in scores.columns if c in all_common and c in exp_df.columns] # find intersection gene symbols in expression data
+        radicals = scores[common_cols].stack()
+        radicals = radicals[radicals != 0]
+        
+        for (patient, symbol), val in tqdm(radicals.items(), total=len(radicals), desc="Linking Samples to KGs"):
+            label = patient_labels[patient]
+            # check if patient is training sample
+            is_train = patient_graph.nodes[patient].get('train_mask', False)
+            
+            if is_train:
+                if label == disease_label and symbol in map_disease:
+                    target_node = map_disease[symbol]
+                elif label == control_label and symbol in map_control:
+                    target_node = map_control[symbol]
+                else:
+                    continue 
+
+                rel = self.relation_map.get(int(val))
+                weight = float(exp_df.loc[patient, symbol])
+
+                full_graph.add_edge(patient, target_node, relation=rel, weight=weight)
+                full_graph.add_edge(target_node, patient, relation=f'rev_{rel}', weight=weight)
+                
+                # Update summary_df
+                col = 'pos_edges' if int(val) == 1 else 'neg_edges'
+                summary_df.at[patient, col] += 1
+                
+                # Append the target node name to the list of linked nodes
+                summary_df.at[patient, 'linked_nodes'].append(target_node)
+            else:
+                # Optional: Handle non-training nodes if necessary
+                pass
+
+        return full_graph, summary_df, radicals
+    
+    def get_candidate_node_names(self, summary_df, radicals, pattern_disease, pattern_control, split='val'):
+        """
+        Returns dictionaries mapping patient_name to lists of protein_node_names.
+        """
+        val_sample_names = summary_df[summary_df[split] == True].index.to_list()
+        
+        map_disease = self.get_symbol_mapping(self.kg_disease, pattern_disease)
+        map_control = self.get_symbol_mapping(self.kg_healthy, pattern_control)
+
+        # Result structure: { patient_name: [node_name1, node_name2, ...] }
+        d_up, d_down, c_up, c_down = {}, {}, {}, {}
+
+        for name in val_sample_names:
+            d_up[name], d_down[name], c_up[name], c_down[name] = [], [], [], []
+            sample_radicals = radicals[name] # All genes for this sample
+            
+            for symbol, direction in sample_radicals.items():
+                # Check Disease KG
+                if symbol in map_disease:
+                    node_name = map_disease[symbol]
+                    if direction == 1: d_up[name].append(node_name)
+                    else: d_down[name].append(node_name)
+                
+                # Check Control KG
+                if symbol in map_control:
+                    node_name = map_control[symbol]
+                    if direction == 1: c_up[name].append(node_name)
+                    else: c_down[name].append(node_name)
+
+        return val_sample_names, d_up, d_down, c_up, c_down
+    
+'''       
+class PatientNetworkGenerator:
+    def __init__(self, kg_disease, kg_healthy):
+        """
+        Initializes with knowledge graphs. All input graphs are forced to MultiDiGraph.
+        """
+        # Ensure all base KGs are MultiDiGraph to support multiple relations
+        self.kg_disease = nx.MultiDiGraph(kg_disease)
+        self.kg_healthy = nx.MultiDiGraph(kg_healthy)
+        
+        self.relation_map = {1: 'up_reg', -1: 'down_reg'}
+
+    def get_symbol_mapping(self, graph: nx.Graph, pattern: str):
         """Helper function to create {gene_symbol: kg_node} mapping"""
         mapping = {}
         if graph is None: return mapping
@@ -210,7 +360,7 @@ class PatientNetworkGenerator:
 
         overlay_graph = nx.MultiDiGraph(self.base_graph).copy()
         
-        symbol_to_kg_node = self._get_symbol_mapping(overlay_graph, pattern)
+        symbol_to_kg_node = self.get_symbol_mapping(overlay_graph, pattern)
         common_proteins = [s for s in scores.columns if s in symbol_to_kg_node]
         
         sparse_data = scores[common_proteins].stack()
@@ -241,73 +391,8 @@ class PatientNetworkGenerator:
             summary_df.at[patient, col] += 1
 
         return overlay_graph, summary_df
-
-    def generate_hybrid_network(
-                                self, 
-                                data: pd.DataFrame, 
-                                exp_df: pd.DataFrame, 
-                                pattern_disease: str,
-                                pattern_control:str,
-                                disease_label: int = 1,
-                                control_label: int = 0
-                            ) -> Tuple[nx.Graph, pd.DataFrame]:
-        """
-        Generates a combined network:
-        1. Patient-Patient network via K-NN clustering based on Cosine Similarity.
-        2. Disease Patients -> KG_Disease.
-        3. Control Patients -> KG_Control.
-        """
-        # 1. Setup and Mappings
-        patient_labels = data['label'].to_dict()
-        scores = data.drop(columns=['label'])
-        
-        map_disease = self._get_symbol_mapping(self.kg_disease, pattern_disease)
-        map_control = self._get_symbol_mapping(self.kg_healthy, pattern_control)
-
-        # Initialize the big network with both KGs combined
-        # nx.compose merges nodes and edges from both graphs
-        full_graph = nx.compose(self.kg_disease, self.kg_healthy)
-        
-        # 2. Add Patient-Patient Similarity Edges (Cosine)
-        print("Contructing Patient-Patient Netwrok")
-        patient_graph = build_knn_graph_with_masks(features_df=exp_df,
-                                                   labels_series=data['label'],
-                                                   k=5,
-                                                   base_graph_type=type(full_graph))
-        full_graph = nx.compose(full_graph, patient_graph)
-        
-        # 3. Add Patient-Protein Edges based on Label
-        summary_df = pd.DataFrame(0, index=data.index, columns=['pos_edges', 'neg_edges'])
-        
-        # Identify radicals to iterate over
-        all_common = set(map_disease.keys()) | set(map_control.keys())
-        common_cols = [c for c in scores.columns if c in all_common and c in exp_df.columns]
-        radicals = scores[common_cols].stack()
-        radicals = radicals[radicals != 0]
-
-        for (patient, symbol), val in tqdm(radicals.items(), total=len(radicals), desc="Linking Samples to KGs"):
-            label = patient_labels[patient]
-            
-            # Determine which KG to use
-            if label == disease_label and symbol in map_disease:
-                target_node = map_disease[symbol]
-            elif label == control_label and symbol in map_control:
-                target_node = map_control[symbol]
-            else:
-                continue # Skip if gene isn't in the respective KG for that label
-
-            rel = self.relation_map.get(int(val))
-            weight = float(exp_df.loc[patient, symbol])
-
-            # Add forward and reverse edges
-            full_graph.add_edge(patient, target_node, relation=rel, weight=weight)
-            full_graph.add_edge(target_node, patient, relation=f'rev_{rel}', weight=weight)
-            
-            col = 'pos_edges' if int(val) == 1 else 'neg_edges'
-            summary_df.at[patient, col] += 1
-
-        return full_graph, summary_df
-
+'''     
+    
 def merge_2kg(G, H, output_dir=None, dataset=None, scoring_method=None):
     combined = nx.compose(G, H)
     
@@ -356,7 +441,7 @@ def generat_and_save_hybrid(exp_path:str,
     png = PatientNetworkGenerator(kg_disease=kg_disease,
                                   kg_healthy=kg_control)
     if process_method == 'hybrid':
-        network, summary = png.generate_hybrid_network(data=data,
+        network, summary, radicals = png.generate_hybrid_network(data=data,
                                         exp_df=exp_norm,
                                         pattern_disease=pattern_disease,
                                         pattern_control=pattern_control,
@@ -409,7 +494,7 @@ def main():
                         help="Path to Disease Knowledge Graph (.pkl).")
     parser.add_argument("--kg_healthy", type=str, default="../AD/data/KG/healthy_aging_reversed_remove_noncausal.pkl", 
                         help="Path to Healthy Knowledge Graph (.pkl).")
-    parser.add_argument("--output_dir", type=str, default="../datasets/Patient_KGs", 
+    parser.add_argument("--output_dir", type=str, default="../datasets/TrainSample_KGs", 
                         help="Directory to save generated networks.")
 
     # Arguments need to change
@@ -418,12 +503,12 @@ def main():
     parser.add_argument("--dataset", type=str, default="geo", choices=['adni','geo'], 
                         help="Name of the dataset (for naming files).")
 
-    parser.add_argument("--scoring_path", type=str, default="../AD/data/GEO/GSE33000_ad_hd/map_ad_kg/sample_scoring_ecdf.csv", 
+    parser.add_argument("--scoring_path", type=str, default="../AD/data/GEO/GSE33000_ad_hd/map_ad_kg/sample_scoring_std.csv", 
                         help="Path to sample scoring CSV (must contain 'label' column).")
-    parser.add_argument("--scoring_type", type=str, default="ecdf", choices=['ecdf','std','logfc'],
+    parser.add_argument("--scoring_type", type=str, default="std", choices=['ecdf','std','logfc'],
                         help="The scoring method used (for naming files).")
     
-    parser.add_argument("--method", type=str, default="HealthyKG", choices=['hybrid', 'merge', 'ADKG', 'HealthyKG'], 
+    parser.add_argument("--method", type=str, default="hybrid", choices=['hybrid', 'merge', 'ADKG', 'HealthyKG'], 
                         help="Network construction strategy.")
     
     args = parser.parse_args()
