@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
+import networkx as nx
 
 try:
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,7 +28,7 @@ from train_hybridkg import (
 from utilities import (assign_kg_by_NodeCls, 
                        assign_kg_by_EmbDistance,
                        assign_kg_by_EdgeScore,
-                       add_val_kg_edges,
+                       augment_graph_with_kg_edges,
                        convert_to_hetero_data, 
                        bridge_names_to_indices)
 
@@ -65,7 +66,7 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--weight_decay', type=float, default=1e-5)
-    parser.add_argument('--lambda_link', type=float, default=0.7, help="Weight for link prediction loss")
+    parser.add_argument('--lambda_link', type=float, default=0.5, help="Weight for link prediction loss")
     
     # Logic Params
     parser.add_argument('--val_ratio', type=float, default=0.15)
@@ -76,12 +77,12 @@ def parse_args():
 
     return parser.parse_args()
 
-def run_hybrid_pipeline(args, data, model, optimizer, device,
-                        val_indices, d_up_ids, d_down_ids, c_up_ids, c_down_ids):
+def run_hybrid_pipeline(args, data, model, optimizer, device,train_edges,
+                        nontrain_indices, d_up_ids, d_down_ids, c_up_ids, c_down_ids):
     
     # --- STAGE 1: Initial Training ---
     print("\n>>> Stage 1: Initial Training (Training nodes only)")
-    train_edges = {etype: data[etype].edge_index for etype in data.edge_types}
+    #train_edges = {etype: data[etype].edge_index for etype in data.edge_types}
     model, history_stage1 = train(model, data, train_edges, None, optimizer, device, epochs=args.epochs)
 
     # --- STAGE 2: Inference & Assignment ---
@@ -92,41 +93,46 @@ def run_hybrid_pipeline(args, data, model, optimizer, device,
         # Get embeddings from the stage 1 model
         z_dict = model.encode(x_dict, train_edges)
         
-        val_mask = data['Patient'].val_mask
-        val_embs = z_dict['Patient'][val_mask]
+        nontrain_mask = ~data['Patient'].train_mask
+        nontrain_embs = z_dict['Patient'][nontrain_mask]
+        non_train_indices = torch.where(nontrain_mask)[0]
+        
+        # check the correctness of nontrain_indices
+        assert nontrain_indices == non_train_indices.tolist()
         
         if args.assign_method == 'emb':
             train_mask = data['Patient'].train_mask
             assignment, confidence = assign_kg_by_EmbDistance(
-                val_embs, z_dict['Patient'][train_mask], data['Patient'].y[train_mask]
+                nontrain_embs, z_dict['Patient'][train_mask], data['Patient'].y[train_mask]
             )
         elif args.assign_method == 'edge':
             assignment, confidence = assign_kg_by_EdgeScore(
-                model, data, z_dict, val_indices, 
+                model, data, z_dict, nontrain_indices, 
                 d_up_ids, d_down_ids, c_up_ids, c_down_ids, device
             )
         else: # 'cls'
-            assignment, confidence = assign_kg_by_NodeCls(model, z_dict, val_mask)
+            assignment, confidence = assign_kg_by_NodeCls(model, z_dict, nontrain_mask)
 
         # Update the graph with new edges for confident val nodes
-        data = add_val_kg_edges(
-            data, assignment, confidence, val_indices, 
+        data = augment_graph_with_kg_edges(
+            data, assignment, confidence, nontrain_indices, 
             d_up_ids, d_down_ids, c_up_ids, c_down_ids, threshold=args.confidence_threshold
         )
 
     # --- STAGE 3: Retraining on Augmented Graph ---
     print("\n>>> Stage 3: Retraining on Augmented Graph")
     augmented_edges = {etype: data[etype].edge_index for etype in data.edge_types}
-    model, history_stage2 = train(model, data, augmented_edges, None, optimizer, device, epochs=args.epochs // 2)
+    model, history_stage2 = train(model, data, augmented_edges, None, optimizer, device, epochs=args.epochs)
 
     # Combine histories
     full_history = {**history_stage1, **history_stage2}
     
     # Package assignment info for saving
     val_info = {
-        'indices': val_indices.tolist(),
+        'indices': list(nontrain_indices),
         'assignments': assignment.tolist(),
-        'confidence': confidence.tolist()
+        'confidence': confidence.tolist(),
+        'true_labels': data['Patient'].y[nontrain_mask].tolist()
     }
 
     return model, full_history, val_info
@@ -171,13 +177,21 @@ def main():
     )
 
     # 3. Mappings & PyG Conversion
-    val_names, d_up_names, d_down_names, c_up_names, c_down_names = png.get_candidate_node_names(
-        summary_df, radicals, pattern_disease, pattern_control
+    target_names, d_up_names, d_down_names, c_up_names, c_down_names = png.get_candidate_node_names(
+        summary_df=summary_df, 
+        radicals=radicals, 
+        pattern_disease=pattern_disease, 
+        pattern_control=pattern_control,
+        split='train'
     )
     
+    # Convert to MultiDiGraph if needed
+    if not isinstance(full_graph, nx.MultiDiGraph):
+        full_graph = nx.MultiDiGraph(full_graph)
+    
     data, node_mappings = convert_to_hetero_data(full_graph)
-    val_indices, d_up_ids, d_down_ids, c_up_ids, c_down_ids = bridge_names_to_indices(
-        val_names, d_up_names, d_down_names, c_up_names, c_down_names, node_mappings
+    target_indices, d_up_ids, d_down_ids, c_up_ids, c_down_ids = bridge_names_to_indices(
+        target_names, d_up_names, d_down_names, c_up_names, c_down_names, node_mappings
     )
 
     # 4. Prepare for PyG Training
@@ -200,23 +214,46 @@ def main():
 
     # 5. Run Pipeline
     model, history, val_assignment_info = run_hybrid_pipeline(
-        args, data, model, optimizer, device, 
-        val_indices, d_up_ids, d_down_ids, c_up_ids, c_down_ids
+        args, data, model, optimizer, device, train_edges,
+        target_indices, d_up_ids, d_down_ids, c_up_ids, c_down_ids
     )
 
     # 6. Evaluation
     print("\nFinal Testing...")
+    # Re-calculate the updated edge_index_dict
+    edge_index_dict = {etype: data[etype].edge_index for etype in data.edge_types}
+    train_edges, val_edges, test_edges = split_edges(
+        edge_index_dict, val_ratio=args.val_ratio, test_ratio=args.test_ratio, seed=args.seed
+    )
     test_cls_metrics, test_link_metrics = test(
         model, data, train_edges=train_edges, test_edges=test_edges, device=device
     )
 
     # 7. Save Results
+    # save network generation summary_df and radicals(pd.Series)
+    summary_df.to_csv(os.path.join(final_output_dir, "network_generation_summary.csv"), index=False)
+    radicals.to_csv(os.path.join(final_output_dir, "radicals.csv"), index=True)
+
+    # Create a single-row dataframe with ALL metadata + ALL metrics
+    summary_data = {
+        "dataset": args.dataset,
+        "scoring": args.scoring,
+        "model": args.model,
+        "assign_method": args.assign_method,
+        "threshold": args.confidence_threshold,
+        **(test_cls_metrics if isinstance(test_cls_metrics, dict) else {}), # Unpack dictionary (Accuracy, F1, etc.)
+        **(test_link_metrics if isinstance(test_link_metrics, dict) else {})  # Unpack dictionary (AUC, etc.)
+    }
+    
+    summary_df = pd.DataFrame([summary_data])
+    summary_df.to_csv(os.path.join(final_output_dir, "summary.csv"), index=False)
+
     # Save training history
     pd.DataFrame(history).to_csv(os.path.join(final_output_dir, "training_history.csv"))
     
     # Save validation assignments
     with open(os.path.join(final_output_dir, "val_assignments.json"), "w") as f:
-        json.dump(val_assignment_info, f)
+        json.dump(val_assignment_info, f, indent=4)
         
     # Save final metrics
     final_results = {

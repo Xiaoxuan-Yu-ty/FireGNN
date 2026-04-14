@@ -237,7 +237,7 @@ def train_one_epoch(
     )
 
     # 3. Joint loss
-    loss = (1-lambda_link)*cls_loss + lambda_link * link_loss
+    loss = cls_loss + lambda_link * link_loss
 
     loss.backward()
     optimizer.step()

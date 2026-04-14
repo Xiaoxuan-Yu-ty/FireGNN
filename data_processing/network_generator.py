@@ -288,11 +288,11 @@ class PatientNetworkGenerator:
 
         return full_graph, summary_df, radicals
     
-    def get_candidate_node_names(self, summary_df, radicals, pattern_disease, pattern_control, split='val'):
+    def get_candidate_node_names(self, summary_df, radicals, pattern_disease, pattern_control, split='train'):
         """
         Returns dictionaries mapping patient_name to lists of protein_node_names.
         """
-        val_sample_names = summary_df[summary_df[split] == True].index.to_list()
+        val_sample_names = summary_df[summary_df[split] == False].index.to_list()
         
         map_disease = self.get_symbol_mapping(self.kg_disease, pattern_disease)
         map_control = self.get_symbol_mapping(self.kg_healthy, pattern_control)

@@ -91,29 +91,28 @@ def convert_to_hetero_data(G: nx.MultiDiGraph):
     print(f"HeteroData created: {len(data.node_types)} node types, {len(data.edge_types)} edge types.")
     return data, node_mappings
 
-# Get val_indices and candidate node indices
-def bridge_names_to_indices(val_sample_names, d_up, d_down, c_up, c_down, node_mappings):
+# Get all non-training samples indices and candidate node indices
+def bridge_names_to_indices(candidate_names, d_up_names, d_down_names, c_up_names, c_down_names, node_mappings):
     """
-    Translates NetworkX node names to PyG integer indices.
+    Translates NetworkX node names to PyG integer indices for any set of nodes (Val + Test).
     """
     p_map = node_mappings['Patient']
     pr_map = node_mappings['Protein']
 
-    # Convert val_sample names to PyG indices
-    val_indices = [p_map[name] for name in val_sample_names]
+    # Convert node names to PyG indices
+    candidate_indices = [p_map[name] for name in candidate_names]
 
-    # convert list of names to list of indices
+    # Helper to convert list of names to list of indices
     def to_idx(name_dict):
-        # return: { patient_pyg_idx: [protein_pyg_idx1, protein_pyg_idx2] }
         return {p_map[p_name]: [pr_map[pr_name] for pr_name in pr_list] 
-                for p_name, pr_list in name_dict.items()}
+                for p_name, pr_list in name_dict.items() if p_name in p_map}
 
     return (
-        val_indices, 
-        to_idx(d_up), 
-        to_idx(d_down), 
-        to_idx(c_up), 
-        to_idx(c_down)
+        candidate_indices, 
+        to_idx(d_up_names), 
+        to_idx(d_down_names), 
+        to_idx(c_up_names), 
+        to_idx(c_down_names)
     )
 
 # Inference helpers
@@ -212,16 +211,31 @@ def assign_kg_by_NodeCls(model, z_dict, val_mask):
     return assignment, confidence
 
 
-def add_val_kg_edges(data, assignment, confidence, val_indices, 
+def augment_graph_with_kg_edges(data, assignment, confidence, target_indicies, 
                      d_up_ids, d_down_ids, c_up_ids, c_down_ids, threshold=0.85):
-    
+    """Connects target_indices (Val + Test) to KG proteins based on assignments.
+
+    Args:
+        data (_type_): _description_
+        assignment (_type_): _description_
+        confidence (_type_): _description_
+        target_indicies (_type_): _description_
+        d_up_ids (_type_): _description_
+        d_down_ids (_type_): _description_
+        c_up_ids (_type_): _description_
+        c_down_ids (_type_): _description_
+        threshold (float, optional): _description_. Defaults to 0.85.
+
+    Returns:
+        _type_: _description_
+    """
     etypes = [
         ('Patient', 'up_reg', 'Protein'), ('Patient', 'down_reg', 'Protein'),
         ('Protein', 'rev_up_reg', 'Patient'), ('Protein', 'rev_down_reg', 'Patient')
     ]
     new_edges = {etype: [] for etype in etypes}
 
-    for i, p_idx in enumerate(val_indices):
+    for i, p_idx in enumerate(target_indicies):
         if confidence[i] < threshold:
             continue
         
