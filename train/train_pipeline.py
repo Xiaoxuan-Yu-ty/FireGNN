@@ -40,19 +40,19 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Hybrid Hetero-KG Pipeline")
     
     # Data Paths
-    parser.add_argument('--exp_path', type=str, default="../AD/data/ADNI/adni_exp_2cls.csv", 
+    parser.add_argument('--exp_path', type=str, default="../AD/data/GEO/GSE33000_ad_hd/GSE33000_exp_2cls.csv", 
                         help="Path to expression CSV")
-    parser.add_argument('--scoring_path', type=str, default="../AD/data/ADNI/map_ad_kg/sample_scoring_ecdf.csv", 
+    parser.add_argument('--scoring_path', type=str, default="../AD/data/GEO/GSE33000_ad_hd/map_ad_kg/sample_scoring_ecdf.csv", 
                         help="Path to sample scoring CSV")
     parser.add_argument('--kg_disease_path', type=str, default="../AD/data/KG/ad_kg_reversed_noncausal_removed.pkl")
     parser.add_argument('--kg_health_path', type=str, default="../AD/data/KG/healthy_aging_reversed_remove_noncausal.pkl")
     
     # for save path: {base_output}/{dataset}/{scoring}/{model}/{assign_method}/
     parser.add_argument('--output_dir', type=str, default="../results/HybridPipeline/")
-    parser.add_argument('--dataset', type=str, default='adni', choices=['adni', 'geo'])
+    parser.add_argument('--dataset', type=str, default='geo', choices=['adni', 'geo'])
     parser.add_argument('--scoring', type=str, default='ecdf', choices=['ecdf', 'std', 'logfc'])
     parser.add_argument('--model', type=str, default='gat', choices=['gat', 'hgt', 'sage'])
-    parser.add_argument('--assign_method', type=str, default='cls', choices=['emb', 'edge', 'cls'])
+    parser.add_argument('--assign_method', type=str, default='edge', choices=['emb', 'edge', 'cls'])
 
     
     # Model Hyperparams
@@ -63,7 +63,7 @@ def parse_args():
     parser.add_argument('--dropout', type=float, default=0.3)
     
     # Training Hyperparams
-    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--weight_decay', type=float, default=1e-5)
     parser.add_argument('--lambda_link', type=float, default=0.5, help="Weight for link prediction loss")
